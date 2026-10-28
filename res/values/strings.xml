@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="key_service_desc">Ouvre les réglages d\'Accueil TV avec le bouton réglages et le bouton source de la télécommande.</string>
+    <string name="key_service_desc">Ouvre les paramètres de la télé avec le bouton réglages de la télécommande, et le menu des entrées d\'Accueil TV avec le bouton entrées.</string>
     <string name="key_service_label">Touches Accueil TV</string>
 </resources>

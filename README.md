@@ -1,90 +1,99 @@
 # Accueil TV
 
-**Un accueil rapide et sans pub pour Android TV / Google TV, façon Apple TV.**
-Un dock de tes applis récentes, des fonds d'écran qui tournent, une rangée « À suivre » de tes
-derniers programmes, et le bouton réglages de la télécommande qui ouvre directement les paramètres.
-Open source (MIT). Rien n'est désinstallé, tout est réversible.
+**English** · [Français](README.fr.md)
+
+**A fast, ad-free home screen for Android TV / Google TV, Apple TV style.**
+A dock of your recent apps, rotating wallpapers, an "Up Next" row with your latest shows, and the
+remote's settings button opening the TV settings directly.
+Open source (MIT). Nothing is uninstalled, everything can be undone.
 
 ---
 
-## Installation en une commande
+## One-command install
 
-Sur **ton ordinateur** (même Wi-Fi que la télé), colle ceci dans un terminal :
+On **your computer** (same Wi-Fi as the TV), paste this into a terminal:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Leptitluc/android-apple-tv/main/install.sh)
 ```
 
-L'assistant te guide pas à pas : il explique comment activer le débogage sur la télé, trouve
-l'appareil, **fait une sauvegarde**, allège le système (pubs, télémétrie, applis inutiles — en te
-demandant pour celles que tu pourrais utiliser), installe Accueil TV, met en place le bouton
-réglages et le définit comme accueil par défaut. Environ 5 minutes.
+The assistant first asks for your language (English or French), then walks you through each step:
+it explains how to enable debugging on the TV, finds the device, **makes a backup**, slims down the
+system (ads, telemetry, useless apps — asking you about the ones you might use), installs
+Accueil TV, sets up the settings button and makes it the default home screen. About 5 minutes.
 
-### À faire d'abord sur la télé (une seule fois)
+### Do this on the TV first (just once)
 
-1. **Paramètres → Système → À propos**, puis appuie **7 fois** sur « Version d'Android TV OS » (ou
-   « Numéro de build ») jusqu'au message « Vous êtes développeur ».
-2. **Paramètres → Système → Options pour les développeurs → Débogage USB** : active-le.
-3. Note l'adresse IP : **Paramètres → Réseau et Internet**.
+1. **Settings → System → About**, then press **"Android TV OS build"** (or "Build") **7 times**
+   until you see "You are now a developer!".
+2. **Settings → System → Developer options → USB debugging**: turn it on.
+3. Note the IP address: **Settings → Network & Internet**.
 
-Pendant l'installation, la télé affichera **« Autoriser le débogage USB ? »** : accepte et coche
-**« Toujours autoriser »**.
+During the install, the TV will show **"Allow USB debugging?"**: accept and tick
+**"Always allow from this computer"**.
 
-### Sans curl (en clonant le dépôt)
+### Without curl (by cloning the repo)
 
 ```bash
 git clone https://github.com/Leptitluc/android-apple-tv.git
 cd android-apple-tv
-./install.sh            # ou ./install.sh 192.168.1.20
+./install.sh            # or ./install.sh 192.168.1.20
 ```
+
+To skip the language question, set `ACCUEIL_TV_LANG=en` (or `fr`) before the command.
 
 ---
 
-## Ce que tu obtiens
+## What you get
 
-- **Pas de pub.** Aucune rangée sponsorisée, aucune bannière.
-- **Un dock** de tes applis récentes, et une grille de toutes les applis alignée dessous.
-- **Des fonds d'écran** qui tournent (nature, art, architecture, nuit… réglable), avec crédits.
-- **« À suivre »** : tes derniers programmes repris là où tu t'étais arrêté, en plein écran façon tvOS.
-- **Menu rapide** sur l'accueil : catégories de fond d'écran, durée, quelles applis nourrissent
-  « À suivre », afficher/masquer les applis, et « Plus de réglages ».
-- **Le bouton réglages** de la télécommande ouvre les paramètres de la télé.
-- **Rapide et léger**, et **réversible** : une sauvegarde est faite avant toute modification.
+- **No ads.** No sponsored rows, no banners.
+- **A dock** of your recent apps, with a grid of all your apps lined up below.
+- **Wallpapers** that rotate (nature, art, architecture, night… adjustable), with credits.
+- **"Up Next"**: your latest shows, resumed where you left off, full screen like tvOS.
+- **Quick menu** on the home screen: wallpaper categories, duration, which apps feed "Up Next",
+  show/hide apps, and "More settings".
+- **TV inputs** (HDMI, AV, antenna…) one click away, next to the clock, with the names of
+  connected devices when the TV provides them. Inputs with nothing switched on are dimmed.
+  The remote's Input button opens the same menu.
+  The button is hidden on boxes without inputs.
+- **The remote's settings button** opens the TV settings.
+- **Fast and light**, and **reversible**: a backup is made before any change.
 
-## Compatibilité
+The installer speaks English and French. The home screen itself is currently in French.
 
-Android TV / Google TV, Android 8 ou plus récent. L'installeur reconnaît les marques courantes
-(TCL, Vestel/Toshiba…) pour l'allègement ; sur les autres, il applique une base sûre et te demande
-pour le reste. Certaines télés protègent le bouton « Source » au niveau système : il restera alors
-sur le menu d'origine.
+## Compatibility
 
-## Tout annuler
+Android TV / Google TV, Android 8 or newer. The installer recognizes common brands (TCL,
+Vestel/Toshiba…) for the slimming step; on others, it applies a safe baseline and asks you about
+the rest. Some TVs protect the "Source" button at system level: it will then keep the original
+menu.
+
+## Undo everything
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Leptitluc/android-apple-tv/main/restaurer.sh)
 ```
 
-ou, depuis un clone : `./restaurer.sh`. Les applis désactivées sont réactivées, les réglages
-d'origine rétablis et Accueil TV désinstallé.
+or, from a clone: `./restaurer.sh`. Disabled apps are re-enabled, original settings restored and
+Accueil TV uninstalled. It reuses the language chosen during install.
 
-## Construire soi-même (facultatif)
+## Build it yourself (optional)
 
 ```bash
 # macOS
 brew install --cask temurin android-commandlinetools android-platform-tools
 sdkmanager "build-tools;34.0.0" "platforms;android-34"
-./build.sh      # produit app/AccueilTV.apk
+./build.sh      # produces app/AccueilTV.apk
 ```
 
-Pas de Gradle : `build.sh` enchaîne aapt2 → javac → d8 → zipalign → apksigner. Garde le fichier
-`accueil-tv.keystore` créé au premier build pour signer tes futures versions avec la même clé.
+No Gradle: `build.sh` chains aapt2 → javac → d8 → zipalign → apksigner. Keep the
+`accueil-tv.keystore` file created on the first build to sign future versions with the same key.
 
-## Sécurité et vie privée
+## Security and privacy
 
-Aucun compte, aucun traqueur. Les modifications passent toutes par `pm disable-user` (réversible),
-jamais de désinstallation d'appli système. Les fonds d'écran sont téléchargés sur la télé depuis
-Wikimedia Commons.
+No account, no trackers. All changes go through `pm disable-user` (reversible), never
+uninstalling a system app. Wallpapers are downloaded on the TV from Wikimedia Commons.
 
-## Licence
+## License
 
-MIT — voir [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

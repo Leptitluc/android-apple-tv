@@ -56,6 +56,8 @@ public class HomeActivity extends Activity {
         void pick(int index);
     }
 
+    static final String ACTION_INPUTS = BuildConfig.PKG + ".action.INPUTS";
+
     private static final int COLS = 6;
     private static final int DOCK_COUNT = 6;
     private static final long FADE_MS = 1_800;
@@ -70,11 +72,10 @@ public class HomeActivity extends Activity {
     private ImageView wallFront, wallBack, blurView;
     private View dim;
     private FocusScroll scroll;
-    private LinearLayout content, dockRow, themeButton;
+    private LinearLayout content, dockRow, themeButton, inputsButton;
     private GridLayout grid;
     private TextView notice;
     private String currentCaption = "";
-    private ImageView themeIcon;
     private Walls walls;
     private ObjectAnimator scrollAnim;
     private Bitmap glassBlur;
@@ -149,6 +150,7 @@ public class HomeActivity extends Activity {
         f.addAction(Intent.ACTION_PACKAGE_CHANGED);
         f.addDataScheme("package");
         registerReceiver(packages, f);
+        if (ACTION_INPUTS.equals(getIntent().getAction())) handler.post(this::inputsMenu);
     }
 
     private View buildUi() {
@@ -240,27 +242,9 @@ public class HomeActivity extends Activity {
         clock.setIncludeFontPadding(false);
         pill.addView(clock);
 
-        themeButton = new LinearLayout(this);
-        themeButton.setGravity(Gravity.CENTER);
-        themeButton.setFocusable(true);
-        themeButton.setClickable(true);
-        themeIcon = new ImageView(this);
-        themeIcon.setImageResource(R.drawable.ic_toggles);
-        themeButton.addView(themeIcon, new LinearLayout.LayoutParams(dp(16), dp(16)));
-        GradientDrawable solid = new GradientDrawable();
-        solid.setColor(0xF7FFFFFF);
-        solid.setShape(GradientDrawable.OVAL);
-        themeButton.setOnFocusChangeListener((v, focused) -> {
-            themeButton.setBackground(focused ? solid : null);
-            themeIcon.setImageTintList(ColorStateList.valueOf(focused ? 0xFF15171A : 0xFFFFFFFF));
-            float sc = focused ? 1.18f : 1f;
-            themeButton.animate().scaleX(sc).scaleY(sc).translationZ(focused ? dp(10) : 0)
-                    .setDuration(200).setInterpolator(new DecelerateInterpolator(1.6f)).start();
-        });
-        themeButton.setOnClickListener(v -> settingsMenu());
-        LinearLayout.LayoutParams tbLp = new LinearLayout.LayoutParams(dp(28), dp(28));
-        tbLp.leftMargin = dp(8);
-        pill.addView(themeButton, tbLp);
+        inputsButton = pillButton(pill, R.drawable.ic_s_input, this::inputsMenu);
+        inputsButton.setVisibility(View.GONE);
+        themeButton = pillButton(pill, R.drawable.ic_toggles, this::settingsMenu);
 
         FrameLayout.LayoutParams clockLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36), Gravity.TOP | Gravity.END);
         clockLp.setMargins(0, dp(26), dp(40), 0);
@@ -276,6 +260,31 @@ public class HomeActivity extends Activity {
         root.addView(notice, noticeLp);
 
         return root;
+    }
+
+    private LinearLayout pillButton(LinearLayout pill, int icon, Runnable onClick) {
+        LinearLayout b = new LinearLayout(this);
+        b.setGravity(Gravity.CENTER);
+        b.setFocusable(true);
+        b.setClickable(true);
+        ImageView iv = new ImageView(this);
+        iv.setImageResource(icon);
+        b.addView(iv, new LinearLayout.LayoutParams(dp(16), dp(16)));
+        GradientDrawable solid = new GradientDrawable();
+        solid.setColor(0xF7FFFFFF);
+        solid.setShape(GradientDrawable.OVAL);
+        b.setOnFocusChangeListener((v, focused) -> {
+            b.setBackground(focused ? solid : null);
+            iv.setImageTintList(ColorStateList.valueOf(focused ? 0xFF15171A : 0xFFFFFFFF));
+            float sc = focused ? 1.18f : 1f;
+            b.animate().scaleX(sc).scaleY(sc).translationZ(focused ? dp(10) : 0)
+                    .setDuration(200).setInterpolator(new DecelerateInterpolator(1.6f)).start();
+        });
+        b.setOnClickListener(v -> onClick.run());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(28), dp(28));
+        lp.leftMargin = dp(8);
+        pill.addView(b, lp);
+        return b;
     }
 
     private Glass glass(View owner, float radius, int shade) {
@@ -345,6 +354,7 @@ public class HomeActivity extends Activity {
         if (fullscreen) exitFullscreen();
         if (shelfFocused) exitShelf(false);
         focusDock();
+        if (ACTION_INPUTS.equals(intent.getAction())) inputsMenu();
     }
 
     private void reloadApps() {
@@ -353,8 +363,17 @@ public class HomeActivity extends Activity {
             Set<String> keys = new LinkedHashSet<>();
             for (AppEntry a : list) keys.add(a.pkg);
             List<String> recent = Recents.top(this, keys, DOCK_COUNT);
-            handler.post(() -> apply(list, recent));
+            boolean hasInputs = !Inputs.load(this).isEmpty();
+            handler.post(() -> {
+                apply(list, recent);
+                showInputsButton(hasInputs);
+            });
         });
+    }
+
+    private void showInputsButton(boolean show) {
+        if (!show && inputsButton.hasFocus()) themeButton.requestFocus();
+        inputsButton.setVisibility(show ? View.VISIBLE : View.GONE);
     }
 
     private void apply(List<AppEntry> list, List<String> recent) {
@@ -777,6 +796,38 @@ public class HomeActivity extends Activity {
         }, null);
     }
 
+    private void inputsMenu() {
+        bg.execute(() -> {
+            List<Inputs.Input> inputs = Inputs.load(this);
+            handler.post(() -> {
+                if (inputs.isEmpty()) {
+                    showInputsButton(false);
+                    notice("Aucune entrée disponible");
+                    return;
+                }
+                String[] labels = new String[inputs.size()];
+                boolean[] idle = new boolean[inputs.size()];
+                for (int i = 0; i < labels.length; i++) {
+                    labels[i] = inputs.get(i).label;
+                    idle[i] = !inputs.get(i).active;
+                }
+                openMenu("Entrées", null, labels, null, -1, null, idle, w -> openInput(inputs.get(w)), null);
+            });
+        });
+    }
+
+    private void openInput(Inputs.Input in) {
+        try {
+            startActivity(Inputs.intent(in));
+        } catch (Exception e) {
+            try {
+                startActivity(Inputs.tvApp());
+            } catch (Exception e2) {
+                notice("Impossible d'ouvrir " + in.label);
+            }
+        }
+    }
+
     private void openSystemSettings() {
         try {
             startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -880,6 +931,10 @@ public class HomeActivity extends Activity {
     }
 
     private void openMenu(String title, String info, String[] items, String[] details, int checked, boolean[] toggles, OnPick onPick, Runnable onBack) {
+        openMenu(title, info, items, details, checked, toggles, null, onPick, onBack);
+    }
+
+    private void openMenu(String title, String info, String[] items, String[] details, int checked, boolean[] toggles, boolean[] dimmed, OnPick onPick, Runnable onBack) {
         if (menu != null) closeMenu();
         menuReturnFocus = getCurrentFocus();
         menuBack = onBack;
@@ -914,7 +969,7 @@ public class HomeActivity extends Activity {
         list.addView(rows);
         for (int i = 0; i < items.length; i++) {
             boolean on = toggles != null ? toggles[i] : i == checked;
-            View row = menuRow(items[i], details == null ? null : details[i], on);
+            View row = menuRow(items[i], details == null ? null : details[i], on, dimmed != null && dimmed[i]);
             int index = i;
             row.setOnClickListener(v -> {
                 if (toggles != null) {
@@ -938,6 +993,7 @@ public class HomeActivity extends Activity {
 
         scroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         themeButton.setFocusable(false);
+        inputsButton.setFocusable(false);
         btnPlay.setFocusable(false);
         btnInfo.setFocusable(false);
         blurView.animate().alpha(1f).setDuration(250).start();
@@ -989,7 +1045,7 @@ public class HomeActivity extends Activity {
         return box;
     }
 
-    private View menuRow(String label, String detail, boolean checked) {
+    private View menuRow(String label, String detail, boolean checked, boolean dim) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -1020,6 +1076,8 @@ public class HomeActivity extends Activity {
         bg.setCornerRadius(dp(14));
         bg.setColor(0x00FFFFFF);
         row.setBackground(bg);
+        float rest = dim ? 0.4f : 1f;
+        row.setAlpha(rest);
         row.setOnFocusChangeListener((v, focused) -> {
             bg.setColor(focused ? 0xF7FFFFFF : 0x00FFFFFF);
             int c = focused ? 0xFF15171A : 0xF2FFFFFF;
@@ -1027,7 +1085,7 @@ public class HomeActivity extends Activity {
             value.setTextColor(focused ? 0x9915171A : 0x99FFFFFF);
             check.setImageTintList(ColorStateList.valueOf(c));
             float s = focused ? 1.03f : 1f;
-            row.animate().scaleX(s).scaleY(s).setDuration(140).start();
+            row.animate().scaleX(s).scaleY(s).alpha(focused ? 1f : rest).setDuration(140).start();
         });
         return row;
     }
@@ -1041,6 +1099,7 @@ public class HomeActivity extends Activity {
         m.animate().alpha(0f).setDuration(200).withEndAction(() -> root.removeView(m)).start();
         scroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         themeButton.setFocusable(true);
+        inputsButton.setFocusable(true);
         btnPlay.setFocusable(shelfFocused);
         btnInfo.setFocusable(shelfFocused);
         onScroll(scroll.getScrollY());
@@ -1055,7 +1114,7 @@ public class HomeActivity extends Activity {
     }
 
     private void onFocus(View v) {
-        if (v == themeButton || v == btnPlay || v == btnInfo) {
+        if (v == themeButton || v == inputsButton || v == btnPlay || v == btnInfo) {
             smoothScroll(0);
             return;
         }
@@ -1195,7 +1254,7 @@ public class HomeActivity extends Activity {
             return true;
         }
         View f = getCurrentFocus();
-        boolean top = f == themeButton;
+        boolean top = f == themeButton || f == inputsButton;
         boolean btn = f == btnPlay || f == btnInfo;
         if (code == KeyEvent.KEYCODE_DPAD_UP && down) {
             if (f instanceof Tile && ((Tile) f).inDock) {
@@ -1232,6 +1291,11 @@ public class HomeActivity extends Activity {
             return true;
         }
         if (top && (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+            if (down && code == KeyEvent.KEYCODE_DPAD_LEFT && f == themeButton && inputsButton.getVisibility() == View.VISIBLE) {
+                inputsButton.requestFocus();
+            } else if (down && code == KeyEvent.KEYCODE_DPAD_RIGHT && f == inputsButton) {
+                themeButton.requestFocus();
+            }
             return true;
         }
         if (code == KeyEvent.KEYCODE_BACK) {

@@ -15,6 +15,7 @@ public final class KeyService extends AccessibilityService {
     static final int KEY_TCL_QUICK_SETTINGS = 4514;
 
     private static KeyService instance;
+    private volatile boolean hasInputs;
 
     static boolean running() {
         return instance != null;
@@ -44,6 +45,7 @@ public final class KeyService extends AccessibilityService {
             info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
             setServiceInfo(info);
         }
+        new Thread(() -> hasInputs = !Inputs.load(this).isEmpty()).start();
         Log.i("TVHome", "keys: service connected");
     }
 
@@ -56,12 +58,19 @@ public final class KeyService extends AccessibilityService {
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
         int code = event.getKeyCode();
-        if (!isSettingsKey(code)) return false;
+        Intent target;
+        if (isSettingsKey(code)) {
+            target = new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        } else if (code == KeyEvent.KEYCODE_TV_INPUT && hasInputs) {
+            // Touche Entrées/Source standard : notre menu des entrées. Sans entrée (box), le système la garde.
+            target = new Intent(this, HomeActivity.class).setAction(HomeActivity.ACTION_INPUTS);
+        } else {
+            return false;
+        }
         if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
-            Log.i("TVHome", "keys: " + code + " -> settings");
+            Log.i("TVHome", "keys: " + code + " -> " + target.getAction());
             try {
-                startActivity(new Intent(Settings.ACTION_SETTINGS)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                startActivity(target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             } catch (Exception e) {
                 Log.w("TVHome", "keys: " + e);
                 return false;
