@@ -3,9 +3,11 @@
 [English](README.md) · **Français**
 
 **Un accueil rapide et sans pub pour Android TV / Google TV, façon Apple TV.**
-Un dock de tes applis récentes, des fonds d'écran qui tournent, une rangée « À suivre » de tes
-derniers programmes, et le bouton réglages de la télécommande qui ouvre directement les paramètres.
+Un dock de tes applis préférées, des fonds d'écran qui tournent, tes derniers programmes dans
+« À suivre », un centre de contrôle, et les boutons de la télécommande branchés sur tout ça.
 Open source (MIT). Rien n'est désinstallé, tout est réversible.
+
+![Écran d'accueil d'Accueil TV](docs/screenshots/accueil.jpg)
 
 ---
 
@@ -46,16 +48,39 @@ Pour sauter la question de la langue, ajoute `ACCUEIL_TV_LANG=fr` (ou `en`) deva
 
 ## Ce que tu obtiens
 
+<table>
+  <tr><td width="50%"><img src="docs/screenshots/a-suivre.jpg" alt="À suivre en plein écran"><br><sub><b>À suivre</b> : arrête-toi sur une appli du dock pour voir ses programmes</sub></td><td width="50%"><img src="docs/screenshots/grille.jpg" alt="Grille des applis"><br><sub><b>Toutes tes applis</b> sous le dock, dans l'ordre que tu choisis</sub></td></tr>
+  <tr><td width="50%"><img src="docs/screenshots/centre-de-controle.jpg" alt="Centre de contrôle"><br><sub><b>Centre de contrôle</b> : volume, entrées, veille, réseau</sub></td><td width="50%"><img src="docs/screenshots/entrees.jpg" alt="Menu des entrées"><br><sub><b>Entrées</b> : celles sans appareil allumé sont en transparence</sub></td></tr>
+  <tr><td width="50%"><img src="docs/screenshots/menu-appli.jpg" alt="Menu d'une appli"><br><sub><b>OK maintenu</b> sur une tuile : déplacer, ajouter au dock, masquer</sub></td><td width="50%"><img src="docs/screenshots/reglages.jpg" alt="Menu rapide"><br><sub><b>Menu rapide</b> : fonds d'écran, À suivre, applis, sons</sub></td></tr>
+  <tr><td width="50%"><img src="docs/screenshots/economiseur.jpg" alt="Économiseur d'écran"><br><sub><b>Économiseur d'écran</b> : tes fonds d'écran, l'heure et le lieu</sub></td></tr>
+</table>
+
 - **Pas de pub.** Aucune rangée sponsorisée, aucune bannière.
-- **Un dock** de tes applis récentes, et une grille de toutes les applis alignée dessous.
-- **Des fonds d'écran** qui tournent (nature, art, architecture, nuit… réglable), avec crédits.
-- **« À suivre »** : tes derniers programmes repris là où tu t'étais arrêté, en plein écran façon tvOS.
+- **Un dock** de tes applis récentes, et une grille de toutes les applis alignée dessous. Maintiens OK
+  sur une tuile pour l'ajouter au dock, l'en retirer, ou choisis « Déplacer » pour la placer où tu veux,
+  comme sur Apple TV. Dès que tu le modifies, le dock ne garde que tes choix (1 à 6 applis, centrées).
+- **Le focus façon tvOS** : la tuile choisie s'incline légèrement du côté de la flèche pressée, puis
+  revient à plat pendant qu'un reflet lumineux glisse dessus. Désactivé si les animations de la télé sont coupées.
+- **Des sons de navigation** : un petit « tic » à chaque déplacement, un son plus plein à la validation,
+  comme sur Apple TV. Désactivables dans le menu rapide de l'accueil.
+- **Des fonds d'écran** qui tournent (nature, art, architecture, nuit… réglable), avec crédits. La
+  catégorie « Selon l'heure » montre des paysages lumineux le jour et des ciels étoilés le soir.
+- **« À suivre »** : arrête-toi sur une appli du dock et ses derniers programmes s'affichent en plein
+  écran, comme le « top shelf » de tvOS, repris là où tu t'étais arrêté.
 - **Menu rapide** sur l'accueil : catégories de fond d'écran, durée, quelles applis nourrissent
   « À suivre », afficher/masquer les applis, et « Plus de réglages ».
 - **Les entrées** (HDMI, AV, antenne…) à portée de clic, à côté de l'heure, avec le nom des
   appareils branchés quand la télé le fournit. Les entrées sans appareil allumé sont en
   transparence. Le bouton entrées de la télécommande ouvre le même
   menu. Le bouton n'apparaît pas sur les box sans entrée.
+- **Un centre de contrôle**, comme sur Apple TV : maintiens le bouton réglages de la télécommande (ou
+  choisis l'icône à interrupteurs à côté de l'heure) pour ouvrir un panneau par-dessus n'importe quelle
+  appli : volume, entrées, minuterie de veille, mise en veille, réseau et réglages. Les options de
+  veille n'apparaissent que sur les télés qui les gèrent.
+- **Lecture en cours** : quand une musique ou une vidéo joue, sa pochette et son titre s'affichent à
+  côté de l'heure, et le centre de contrôle propose lecture/pause, précédent et suivant.
+- **Un économiseur d'écran façon Apple TV** : tes fonds d'écran avec un zoom lent, l'heure, et le lieu
+  affiché quelques secondes sur chaque image, comme les vidéos aériennes de tvOS. L'installeur le sélectionne pour toi.
 - **Le bouton réglages** de la télécommande ouvre les paramètres de la télé.
 - **Rapide et léger**, et **réversible** : une sauvegarde est faite avant toute modification.
 
@@ -92,6 +117,11 @@ Pas de Gradle : `build.sh` enchaîne aapt2 → javac → d8 → zipalign → apk
 Aucun compte, aucun traqueur. Les modifications passent toutes par `pm disable-user` (réversible),
 jamais de désinstallation d'appli système. Les fonds d'écran sont téléchargés sur la télé depuis
 Wikimedia Commons.
+
+L'installeur donne à Accueil TV l'accès aux notifications : c'est la seule voie qu'offre Android pour
+savoir ce qui est en lecture (titre, pochette, lecture/pause). Accueil TV ne lit que les sessions de
+lecture, ne garde rien et n'envoie rien. Il choisit aussi l'économiseur d'écran d'Accueil TV.
+`restaurer.sh` retire l'accès aux notifications et remet les réglages d'économiseur d'origine.
 
 ## Licence
 

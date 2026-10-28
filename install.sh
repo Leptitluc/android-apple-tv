@@ -169,9 +169,13 @@ say "Applis que tu pourrais utiliser (réponds o pour désactiver, Entrée pour 
     "Apps you might use (answer y to disable, Enter to keep):"
 for e in "${ASK[@]}"; do p="${e%%|*}"; l="${e#*|}"; has "$p" || continue; ask "  $(m "Désactiver $l ?" "Disable $l?")" && off "$p"; done
 for k in window_animation_scale transition_animation_scale animator_duration_scale; do sh settings put global "$k" 0.5; done
-for k in screensaver_enabled screensaver_activate_on_sleep screensaver_activate_on_dock; do sh settings put secure "$k" 0; done
+# Économiseur d'écran : celui d'Accueil TV (fonds d'écran, heure et lieu) à la place de celui de Google.
+sh settings put secure screensaver_components "$PKG/$PKG.Dream"
+sh settings put secure screensaver_enabled 1
+sh settings put secure screensaver_activate_on_sleep 1
+sh settings put secure screensaver_activate_on_dock 0
 for p in com.google.android.backdrop com.google.android.apps.tv.dreamx; do has "$p" && sh pm disable-user --user 0 "$p" >/dev/null 2>&1; done
-c_g "$(m "Allègement et économiseur d'écran : faits." "Slimming down and screensaver: done.")"
+c_g "$(m "Allègement fait, économiseur d'écran Accueil TV sélectionné." "Slimming down done, Accueil TV screensaver selected.")"
 
 # --- APK
 step "$(m "5. Installer Accueil TV" "5. Install Accueil TV")"
@@ -197,6 +201,10 @@ fi
 sh pm grant $PKG android.permission.READ_TV_LISTINGS >/dev/null 2>&1
 sh pm grant $PKG android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1
 sh appops set $PKG APP_AUTO_START allow >/dev/null 2>&1
+# Lecture en cours : accès aux sessions média des autres applis (écoute des notifications).
+sh cmd notification allow_listener "$PKG/$PKG.MediaListener" >/dev/null 2>&1 \
+  && c_g "$(m "Lecture en cours : autorisée" "Now playing: allowed")" \
+  || c_y "$(m "Lecture en cours : non disponible sur cette télé" "Now playing: not available on this TV")"
 c_g "$(m "Installé" "Installed"): $(sh dumpsys package $PKG | grep -m1 versionName | tr -d ' ')"
 
 # --- Bouton réglages
