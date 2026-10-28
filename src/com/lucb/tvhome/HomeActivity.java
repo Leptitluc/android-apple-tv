@@ -62,6 +62,8 @@ public class HomeActivity extends Activity {
     private static final int DOCK_COUNT = 6;
     private static final long FADE_MS = 1_800;
     private static final long IDLE_MS = 90_000;
+    private static final long ZOOM_PAUSE_MS = 4_000;
+    private static final long SHELF_DELAY_MS = 400;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService bg = Executors.newSingleThreadExecutor();
@@ -77,7 +79,8 @@ public class HomeActivity extends Activity {
     private TextView notice;
     private String currentCaption = "";
     private Walls walls;
-    private ObjectAnimator scrollAnim;
+    private ObjectAnimator scrollAnim, zoom;
+    private int scrollTarget;
     private Bitmap glassBlur;
     private View menuReturnFocus;
     private Runnable menuBack;
@@ -99,7 +102,7 @@ public class HomeActivity extends Activity {
 
     private int screenW, screenH, tileW, tileH;
     private String gridSig = "", dockSig = "";
-    private boolean fullscreen, swallowUp;
+    private boolean fullscreen, swallowUp, zoomHeld, shelfPending;
 
     private final Runnable rotate = () -> walls.next(this::showWall);
     private final Runnable idle = () -> {
@@ -112,7 +115,18 @@ public class HomeActivity extends Activity {
             showShelfItem();
         }
     };
-    private final Runnable hideNotice = () -> notice.animate().alpha(0f).translationY(-dp(8)).setDuration(300).start();
+    // « À suivre » change le fond en fondu plein écran : seulement quand le focus s'arrête sur une tuile du dock.
+    private final Runnable shelfFocus = () -> {
+        shelfPending = false;
+        View f = getCurrentFocus();
+        if (f instanceof Tile && ((Tile) f).inDock) showShelfFor(((Tile) f).app.pkg);
+    };
+    // Le zoom lent du fond redessine tout l'écran à chaque image : en pause pendant la navigation.
+    private final Runnable resumeZoom = () -> {
+        zoomHeld = false;
+        if (zoom != null) zoom.resume();
+    };
+    private final Runnable hideNotice =() -> notice.animate().alpha(0f).translationY(-dp(8)).setDuration(300).start();
 
     private final BroadcastReceiver packages = new PackageReceiver(this);
 
@@ -168,17 +182,17 @@ public class HomeActivity extends Activity {
         blurView.setAlpha(0f);
         root.addView(blurView, match());
 
-        View scrim = new View(this);
+        View scrim = overlay();
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x4D000000, 0x00000000, 0x00000000, 0x1A000000, 0x8C000000}));
         root.addView(scrim, match());
 
-        dim = new View(this);
+        dim = overlay();
         dim.setBackgroundColor(0xFF000000);
         dim.setAlpha(0f);
         root.addView(dim, match());
 
-        shelfScrim = new View(this);
+        shelfScrim = overlay();
         shelfScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[]{0xB3000000, 0x73000000, 0x14000000, 0x00000000}));
         shelfScrim.setAlpha(0f);
@@ -292,6 +306,22 @@ public class HomeActivity extends Activity {
         glasses.add(g);
         if (glassBlur != null) g.setBlur(glassBlur, screenW, screenH);
         return g;
+    }
+
+    private View overlay() {
+        return new Overlay(this);
+    }
+
+    // Voile plein écran : sa transparence s'applique directement, sans tampon hors écran à chaque image.
+    static final class Overlay extends View {
+        Overlay(Context ctx) {
+            super(ctx);
+        }
+
+        @Override
+        public boolean hasOverlappingRendering() {
+            return false;
+        }
     }
 
     private ImageView wallView() {
@@ -941,7 +971,7 @@ public class HomeActivity extends Activity {
         menu = new FrameLayout(this);
         menu.setClickable(true);
 
-        View shade = new View(this);
+        View shade = overlay();
         shade.setBackgroundColor(0x73000000);
         menu.addView(shade, match());
 
@@ -996,7 +1026,7 @@ public class HomeActivity extends Activity {
         inputsButton.setFocusable(false);
         btnPlay.setFocusable(false);
         btnInfo.setFocusable(false);
-        blurView.animate().alpha(1f).setDuration(250).start();
+        blurView.animate().alpha(1f).setDuration(250).withEndAction(this::syncWall).start();
         shade.setAlpha(0f);
         shade.animate().alpha(1f).setDuration(250).start();
         card.setAlpha(0f);
@@ -1122,7 +1152,9 @@ public class HomeActivity extends Activity {
         Tile t = (Tile) v;
         if (t.inDock) {
             smoothScroll(0);
-            showShelfFor(t.app.pkg);
+            handler.removeCallbacks(shelfFocus);
+            handler.postDelayed(shelfFocus, SHELF_DELAY_MS);
+            shelfPending = true;
             return;
         }
         Rect r = new Rect();
@@ -1130,10 +1162,16 @@ public class HomeActivity extends Activity {
         content.offsetDescendantRectToMyCoords(t, r);
         int dockH = dockPanel.getHeight() > 0 ? dockPanel.getHeight() : dp(102);
         int off = dp(28) + dockH + dp(18);
-        smoothScroll(Math.max(0, Math.min(scroll.maxScroll(), r.top - off)));
+        // Dock épinglé en haut, puis on ne défile que si la tuile sortirait de l'écran.
+        int first = grid.getTop() - off;
+        int above = r.top - off;
+        int below = r.bottom + dp(40) - screenH;
+        int y = Math.max(first, Math.min(above, Math.max(below, scrollTarget)));
+        smoothScroll(Math.max(0, Math.min(scroll.maxScroll(), y)));
     }
 
     private void smoothScroll(int y) {
+        scrollTarget = y;
         if (scrollAnim != null) scrollAnim.cancel();
         if (scroll.getScrollY() == y) return;
         scrollAnim = ObjectAnimator.ofInt(scroll, "scrollY", y);
@@ -1147,6 +1185,7 @@ public class HomeActivity extends Activity {
         if (!fullscreen && menu == null) {
             blurView.setAlpha(f);
             dim.setAlpha(f * 0.3f);
+            syncWall();
             float top = Math.max(0f, 1f - y / (float) dp(120));
             if (shelfActive) {
                 shelfInfo.animate().cancel();
@@ -1159,6 +1198,14 @@ public class HomeActivity extends Activity {
             dockPanel.setTranslationY(pin);
         }
         dockPanel.invalidate();
+    }
+
+    // Fond net masqué quand le flou le recouvre entièrement : son zoom lent ne coûte alors plus rien au GPU.
+    private void syncWall() {
+        int v = !fullscreen && blurView.getAlpha() >= 1f ? View.INVISIBLE : View.VISIBLE;
+        if (wallFront.getVisibility() == v && wallBack.getVisibility() == v) return;
+        wallFront.setVisibility(v);
+        wallBack.setVisibility(v);
     }
 
     private void showWall(Bitmap bmp, String text) {
@@ -1187,12 +1234,15 @@ public class HomeActivity extends Activity {
                 .withEndAction(() -> {
                     if (outgoing == wallBack) outgoing.setImageDrawable(null);
                 }).start();
-        ObjectAnimator zoom = ObjectAnimator.ofPropertyValuesHolder(incoming,
+        ObjectAnimator previous = zoom;
+        if (previous != null) handler.postDelayed(previous::cancel, FADE_MS);
+        zoom = ObjectAnimator.ofPropertyValuesHolder(incoming,
                 PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.06f),
                 PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.06f));
         zoom.setDuration(walls.interval() + FADE_MS * 2);
         zoom.setInterpolator(new LinearInterpolator());
         zoom.start();
+        if (zoomHeld) zoom.pause();
         wallFront = incoming;
         wallBack = outgoing;
 
@@ -1204,6 +1254,7 @@ public class HomeActivity extends Activity {
 
     private void enterFullscreen() {
         fullscreen = true;
+        syncWall();
         scroll.animate().alpha(0f).setDuration(500).start();
         blurView.animate().alpha(0f).setDuration(500).start();
         dim.animate().alpha(0f).setDuration(500).start();
@@ -1215,7 +1266,7 @@ public class HomeActivity extends Activity {
         fullscreen = false;
         scroll.animate().alpha(1f).setDuration(350).start();
         float f = Math.min(1f, scroll.getScrollY() / (float) dp(200));
-        blurView.animate().alpha(f).setDuration(350).start();
+        blurView.animate().alpha(f).setDuration(350).withEndAction(this::syncWall).start();
         dim.animate().alpha(f * 0.3f).setDuration(350).start();
         if (shelfActive) {
             float top = Math.max(0f, 1f - scroll.getScrollY() / (float) dp(120));
@@ -1234,7 +1285,13 @@ public class HomeActivity extends Activity {
     public boolean dispatchKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
-        if (down) resetIdle();
+        if (down) {
+            resetIdle();
+            zoomHeld = true;
+            if (zoom != null) zoom.pause();
+            handler.removeCallbacks(resumeZoom);
+            handler.postDelayed(resumeZoom, ZOOM_PAUSE_MS);
+        }
         if (menu != null) {
             if (code == KeyEvent.KEYCODE_BACK) {
                 if (!down) {
@@ -1258,6 +1315,10 @@ public class HomeActivity extends Activity {
         boolean btn = f == btnPlay || f == btnInfo;
         if (code == KeyEvent.KEYCODE_DPAD_UP && down) {
             if (f instanceof Tile && ((Tile) f).inDock) {
+                if (shelfPending) {
+                    handler.removeCallbacks(shelfFocus);
+                    shelfFocus.run();
+                }
                 if (shelfActive) enterShelf();
                 else themeButton.requestFocus();
                 return true;

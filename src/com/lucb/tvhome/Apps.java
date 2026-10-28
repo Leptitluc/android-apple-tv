@@ -12,6 +12,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
@@ -82,7 +83,7 @@ final class Apps {
         Collator collator = Collator.getInstance(Locale.FRANCE);
         collator.setStrength(Collator.PRIMARY);
         list.sort((a, b) -> collator.compare(a.label, b.label));
-        list.add(settingsEntry(ctx, pm));
+        list.add(settingsEntry(ctx));
         return list;
     }
 
@@ -144,14 +145,59 @@ final class Apps {
         }
     }
 
-    private static AppEntry settingsEntry(Context ctx, PackageManager pm) {
-        Drawable icon;
-        try {
-            icon = pm.getApplicationIcon("com.android.tv.settings");
-        } catch (PackageManager.NameNotFoundException e) {
-            icon = ctx.getDrawable(android.R.drawable.ic_menu_preferences);
+    private static AppEntry settingsEntry(Context ctx) {
+        return new AppEntry(SETTINGS_KEY, null, "Réglages", settingsBanner(ctx), false, new Intent(Settings.ACTION_SETTINGS));
+    }
+
+    // Tuile Réglages façon tvOS : engrenage gris foncé dans un engrenage, sur fond argenté.
+    private static Drawable settingsBanner(Context ctx) {
+        int w = 320, h = 180;
+        float cx = w / 2f, cy = h / 2f;
+        Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bmp);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setShader(new LinearGradient(0, 0, 0, h, 0xFFF2F2F4, 0xFFB9BCC1, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h, p);
+
+        Shader dark = new LinearGradient(0, cy - 68, 0, cy + 68, 0xFF74777D, 0xFF3C3F44, Shader.TileMode.CLAMP);
+        p.setShader(dark);
+        p.setShadowLayer(5, 0, 2, 0x47000000);
+        c.drawPath(gear(cx, cy, 68, 60, 32, 0.42f), p);
+        p.clearShadowLayer();
+        p.setShader(new LinearGradient(0, cy - 50, 0, cy + 50, 0xFF9DA0A6, 0xFFDADCDF, Shader.TileMode.CLAMP));
+        c.drawCircle(cx, cy, 50, p);
+
+        p.setShader(dark);
+        for (int i = 0; i < 6; i++) {
+            c.save();
+            c.rotate(i * 60f, cx, cy);
+            c.drawRect(cx - 3.5f, cy - 51, cx + 3.5f, cy, p);
+            c.restore();
         }
-        return new AppEntry(SETTINGS_KEY, null, "Réglages", generated(ctx, icon), false, new Intent(Settings.ACTION_SETTINGS));
+        p.setShadowLayer(3, 0, 1.5f, 0x40000000);
+        c.drawPath(gear(cx, cy, 31, 25, 12, 0.45f), p);
+        p.clearShadowLayer();
+        p.setShader(new LinearGradient(0, cy - 10, 0, cy + 10, 0xFFA7AAAF, 0xFFE2E3E6, Shader.TileMode.CLAMP));
+        c.drawCircle(cx, cy, 10, p);
+        return new BitmapDrawable(ctx.getResources(), bmp);
+    }
+
+    private static Path gear(float cx, float cy, float outer, float root, int teeth, float duty) {
+        Path path = new Path();
+        double step = 2 * Math.PI / teeth;
+        double flank = step * (1 - duty) / 4;
+        for (int i = 0; i < teeth; i++) {
+            double a = i * step - Math.PI / 2;
+            double[][] pts = {{root, a}, {outer, a + flank}, {outer, a + flank + step * duty}, {root, a + 2 * flank + step * duty}};
+            for (int k = 0; k < pts.length; k++) {
+                float x = cx + (float) (pts[k][0] * Math.cos(pts[k][1]));
+                float y = cy + (float) (pts[k][0] * Math.sin(pts[k][1]));
+                if (i == 0 && k == 0) path.moveTo(x, y);
+                else path.lineTo(x, y);
+            }
+        }
+        path.close();
+        return path;
     }
 
     static Drawable generated(Context ctx, Drawable icon) {

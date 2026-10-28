@@ -1,12 +1,12 @@
 package com.lucb.tvhome;
 
 import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -18,12 +18,14 @@ final class Glass extends Drawable {
     private final View owner;
     private final float radius;
     private final float strokeWidth;
+    // Le flou est peint via un shader dans un rectangle arrondi : bien moins coûteux pour le GPU qu'un clipPath.
     private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+    private final Paint fallback = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private BitmapShader shader;
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint shade = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix matrix = new Matrix();
-    private final Path path = new Path();
     private final RectF rect = new RectF();
     private final int[] loc = new int[2];
     private Bitmap blur;
@@ -35,10 +37,13 @@ final class Glass extends Drawable {
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setStrokeWidth(strokeWidth);
         shade.setColor(shadeColor);
+        fallback.setColor(0x99202428);
     }
 
     void setBlur(Bitmap blur, int screenW, int screenH) {
         this.blur = blur;
+        shader = new BitmapShader(blur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+        bitmapPaint.setShader(shader);
         this.screenW = screenW;
         this.screenH = screenH;
         invalidateSelf();
@@ -47,9 +52,6 @@ final class Glass extends Drawable {
     @Override
     protected void onBoundsChange(Rect bounds) {
         rect.set(bounds);
-        float r = Math.min(radius, rect.height() / 2f);
-        path.reset();
-        path.addRoundRect(rect, r, r, Path.Direction.CW);
         fill.setShader(new LinearGradient(0, rect.top, 0, rect.bottom, 0x24FFFFFF, 0x05FFFFFF, Shader.TileMode.CLAMP));
         stroke.setShader(new LinearGradient(0, rect.top, 0, rect.bottom,
                 new int[]{0x99FFFFFF, 0x1FFFFFFF, 0x14FFFFFF, 0x4DFFFFFF},
@@ -59,19 +61,17 @@ final class Glass extends Drawable {
     @Override
     public void draw(Canvas canvas) {
         float r = Math.min(radius, rect.height() / 2f);
-        canvas.save();
-        canvas.clipPath(path);
         if (blur != null) {
             owner.getLocationInWindow(loc);
             matrix.setScale(screenW / (float) blur.getWidth(), screenH / (float) blur.getHeight());
             matrix.postTranslate(-loc[0], -loc[1]);
-            canvas.drawBitmap(blur, matrix, bitmapPaint);
-            canvas.drawRect(rect, shade);
+            shader.setLocalMatrix(matrix);
+            canvas.drawRoundRect(rect, r, r, bitmapPaint);
+            canvas.drawRoundRect(rect, r, r, shade);
         } else {
-            canvas.drawColor(0x99202428);
+            canvas.drawRoundRect(rect, r, r, fallback);
         }
-        canvas.drawRect(rect, fill);
-        canvas.restore();
+        canvas.drawRoundRect(rect, r, r, fill);
         float h = strokeWidth / 2f;
         canvas.drawRoundRect(rect.left + h, rect.top + h, rect.right - h, rect.bottom - h, r, r, stroke);
     }
