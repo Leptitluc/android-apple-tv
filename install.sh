@@ -145,7 +145,19 @@ if [ -z "${APK:-}" ] || [ ! -f "$APK" ]; then
   echo "Téléchargement de l'application..."
   curl -fsSL "$RAW_BASE/app/AccueilTV.apk" -o "$APK" || { echo "Téléchargement impossible depuis $RAW_BASE"; exit 1; }
 fi
-"${S[@]}" install -r -d "$APK" >>"$LOG" 2>&1 || { c_y "Si la télé bloque (Play Protect) : Plus de détails → Installer quand même, puis relance."; exit 1; }
+OUT="$("${S[@]}" install -r -d "$APK" 2>&1)"; echo "$OUT" >> "$LOG"
+if echo "$OUT" | grep -qi "Success"; then :
+elif echo "$OUT" | grep -qiE "UPDATE_INCOMPATIBLE|signatures do not match|INCONSISTENT_CERTIFICATE"; then
+  c_y "Une version d'Accueil TV signée différemment est déjà installée sur la télé."
+  if ask "La remplacer ? (seuls les réglages de l'accueil sont réinitialisés, le reste de la télé est intact)"; then
+    sh pm uninstall "$PKG" >/dev/null 2>&1
+    "${S[@]}" install "$APK" >>"$LOG" 2>&1 || { echo "Échec de l'installation. Détails : $LOG"; exit 1; }
+  else echo "Installation annulée."; exit 1; fi
+elif echo "$OUT" | grep -qiE "Risky app blocked|FAILED_VERIFICATION"; then
+  c_y "Play Protect bloque sur la télé : Plus de détails → Installer quand même, puis relance ce script."; exit 1
+else
+  echo "Échec de l'installation :"; echo "$OUT" | tail -3; echo "Détails : $LOG"; exit 1
+fi
 sh pm grant $PKG android.permission.READ_TV_LISTINGS >/dev/null 2>&1
 sh pm grant $PKG android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1
 sh appops set $PKG APP_AUTO_START allow >/dev/null 2>&1
