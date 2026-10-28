@@ -1,0 +1,5 @@
+build/
+*.keystore
+config.properties
+/sauvegarde-*/
+.DS_Store
