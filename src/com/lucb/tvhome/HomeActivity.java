@@ -13,11 +13,14 @@ import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.Point;
 import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -74,11 +77,20 @@ public class HomeActivity extends Activity {
     private ImageView wallFront, wallBack, blurView;
     private View dim;
     private FocusScroll scroll;
-    private LinearLayout content, dockRow, themeButton, inputsButton;
+    private LinearLayout content, dockRow, themeButton, inputsButton, controlButton, pill;
     private GridLayout grid;
     private TextView notice;
     private String currentCaption = "";
     private Walls walls;
+    private Sounds sounds;
+    private NowPlaying nowPlaying;
+    private LinearLayout nowChip;
+    private ImageView nowArt;
+    private TextView nowTitle;
+    private long keyAt;
+    private Tile moving;
+    private int moveLimit;
+    private boolean reordering;
     private ObjectAnimator scrollAnim, zoom;
     private int scrollTarget;
     private Bitmap glassBlur;
@@ -93,6 +105,8 @@ public class HomeActivity extends Activity {
     private Bitmap currentWall;
     private Map<String, List<WatchNext.Item>> shelf = new HashMap<>();
     private final LruCache<String, Bitmap> artCache = new LruCache<>(6);
+    private final Set<String> failedArt = new HashSet<>();
+    private Bitmap shownBackdrop;
     private String shelfPkg;
     private int shelfIndex, shelfToken;
     private boolean shelfActive, shelfFocused;
@@ -106,7 +120,7 @@ public class HomeActivity extends Activity {
 
     private final Runnable rotate = () -> walls.next(this::showWall);
     private final Runnable idle = () -> {
-        if (!fullscreen && menu == null && hasWindowFocus()) enterFullscreen();
+        if (!fullscreen && menu == null && moving == null && hasWindowFocus()) enterFullscreen();
     };
     private final Runnable shelfAdvance = () -> {
         List<WatchNext.Item> items = shelfPkg == null ? null : shelf.get(shelfPkg);
@@ -121,6 +135,7 @@ public class HomeActivity extends Activity {
         View f = getCurrentFocus();
         if (f instanceof Tile && ((Tile) f).inDock) showShelfFor(((Tile) f).app.pkg);
     };
+    private final Runnable repairKeys = () -> KeyService.repair(this);
     // Le zoom lent du fond redessine tout l'écran à chaque image : en pause pendant la navigation.
     private final Runnable resumeZoom = () -> {
         zoomHeld = false;
@@ -154,6 +169,8 @@ public class HomeActivity extends Activity {
         tileW = dp(124);
         tileH = dp(74);
         walls = new Walls(this);
+        sounds = new Sounds(this);
+        nowPlaying = new NowPlaying(this, this::updateNow);
         setContentView(buildUi());
 
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> onFocus(newFocus));
@@ -221,10 +238,8 @@ public class HomeActivity extends Activity {
         dockRow.setClipToPadding(false);
         dockPanel.addView(dockRow, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         LinearLayout.LayoutParams dockLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        dockLp.gravity = Gravity.START;
-        dockLp.leftMargin = dp(40) - dp(14);
+        dockLp.gravity = Gravity.CENTER_HORIZONTAL;
         content.addView(dockPanel, dockLp);
-
 
         grid = new GridLayout(this);
         grid.setColumnCount(COLS);
@@ -240,7 +255,7 @@ public class HomeActivity extends Activity {
         root.addView(scroll, match());
         root.addView(buildShelfInfo(), shelfInfoLp());
 
-        LinearLayout pill = new LinearLayout(this);
+        pill = new LinearLayout(this);
         pill.setOrientation(LinearLayout.HORIZONTAL);
         pill.setGravity(Gravity.CENTER_VERTICAL);
         pill.setClipChildren(false);
@@ -254,11 +269,33 @@ public class HomeActivity extends Activity {
         clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         clock.setTypeface(Fonts.get(this, 600));
         clock.setIncludeFontPadding(false);
+        // Lecture en cours : pochette et titre, à gauche de l'heure.
+        nowChip = new LinearLayout(this);
+        nowChip.setOrientation(LinearLayout.HORIZONTAL);
+        nowChip.setGravity(Gravity.CENTER_VERTICAL);
+        nowChip.setVisibility(View.GONE);
+        nowArt = new ImageView(this);
+        nowArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        nowArt.setOutlineProvider(new Tile.Rounded(dp(5)));
+        nowArt.setClipToOutline(true);
+        nowChip.addView(nowArt, new LinearLayout.LayoutParams(dp(22), dp(22)));
+        nowTitle = text(13, 0xF2FFFFFF, 600);
+        nowTitle.setShadowLayer(0, 0, 0, 0);
+        nowTitle.setSingleLine(true);
+        nowTitle.setEllipsize(TextUtils.TruncateAt.END);
+        nowTitle.setMaxWidth(dp(220));
+        LinearLayout.LayoutParams ntLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ntLp.leftMargin = dp(8);
+        nowChip.addView(nowTitle, ntLp);
+        LinearLayout.LayoutParams ncLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ncLp.rightMargin = dp(12);
+        pill.addView(nowChip, ncLp);
         pill.addView(clock);
 
         inputsButton = pillButton(pill, R.drawable.ic_s_input, this::inputsMenu);
         inputsButton.setVisibility(View.GONE);
-        themeButton = pillButton(pill, R.drawable.ic_toggles, this::settingsMenu);
+        controlButton = pillButton(pill, R.drawable.ic_toggles, this::openControl);
+        themeButton = pillButton(pill, R.drawable.ic_gear, this::settingsMenu);
 
         FrameLayout.LayoutParams clockLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36), Gravity.TOP | Gravity.END);
         clockLp.setMargins(0, dp(26), dp(40), 0);
@@ -352,6 +389,7 @@ public class HomeActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        nowPlaying.start();
         handler.removeCallbacks(rotate);
         if (wallFront.getDrawable() == null) walls.next(this::showWall);
         else handler.postDelayed(rotate, walls.interval());
@@ -360,11 +398,15 @@ public class HomeActivity extends Activity {
         reloadApps();
         resetIdle();
         KeyService.ensureEnabled(this);
+        handler.removeCallbacks(repairKeys);
+        handler.postDelayed(repairKeys, 4000);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        nowPlaying.stop();
+        if (moving != null) endMove();
         handler.removeCallbacks(rotate);
         handler.removeCallbacks(idle);
     }
@@ -374,12 +416,15 @@ public class HomeActivity extends Activity {
         unregisterReceiver(packages);
         bg.shutdownNow();
         img.shutdownNow();
+        sounds.release();
+        walls.close();
         super.onDestroy();
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (moving != null) endMove();
         if (menu != null) closeMenu();
         if (fullscreen) exitFullscreen();
         if (shelfFocused) exitShelf(false);
@@ -392,7 +437,10 @@ public class HomeActivity extends Activity {
             List<AppEntry> list = Apps.load(this);
             Set<String> keys = new LinkedHashSet<>();
             for (AppEntry a : list) keys.add(a.pkg);
-            List<String> recent = Recents.top(this, keys, DOCK_COUNT);
+            // Dock personnalisé : uniquement les applis choisies (1 à 6). Sinon, les applis récentes.
+            List<String> recent = new ArrayList<>();
+            for (String pkg : Apps.pinned(this)) if (keys.contains(pkg) && recent.size() < DOCK_COUNT) recent.add(pkg);
+            if (recent.isEmpty()) recent.addAll(Recents.top(this, keys, DOCK_COUNT));
             boolean hasInputs = !Inputs.load(this).isEmpty();
             handler.post(() -> {
                 apply(list, recent);
@@ -401,12 +449,26 @@ public class HomeActivity extends Activity {
         });
     }
 
+    private void updateNow() {
+        android.media.session.MediaController c = nowPlaying.current();
+        if (c == null) {
+            nowChip.setVisibility(View.GONE);
+            return;
+        }
+        Bitmap art = NowPlaying.art(c);
+        nowArt.setImageBitmap(art);
+        nowArt.setVisibility(art != null ? View.VISIBLE : View.GONE);
+        nowTitle.setText(NowPlaying.title(c));
+        nowChip.setVisibility(View.VISIBLE);
+    }
+
     private void showInputsButton(boolean show) {
         if (!show && inputsButton.hasFocus()) themeButton.requestFocus();
         inputsButton.setVisibility(show ? View.VISIBLE : View.GONE);
     }
 
     private void apply(List<AppEntry> list, List<String> recent) {
+        if (moving != null) return;
         Map<String, AppEntry> byPkg = new HashMap<>();
         Set<String> pkgs = new HashSet<>();
         for (AppEntry a : list) pkgs.add(a.pkg);
@@ -416,10 +478,10 @@ public class HomeActivity extends Activity {
         StringBuilder g = new StringBuilder();
         for (AppEntry a : list) {
             byPkg.put(a.pkg, a);
-            if (inDock.contains(a.pkg)) continue;
-            gridList.add(a);
-            g.append(a.pkg).append('|').append(a.label).append(',');
+            if (!inDock.contains(a.pkg)) gridList.add(a);
         }
+        gridList = ordered(gridList, Apps.order(this));
+        for (AppEntry a : gridList) g.append(a.pkg).append('|').append(a.label).append(',');
         String d = TextUtils.join(",", recent);
         View focus = getCurrentFocus();
         boolean focusInDock = !(focus instanceof Tile) || ((Tile) focus).inDock;
@@ -451,6 +513,32 @@ public class HomeActivity extends Activity {
         if (getCurrentFocus() == null && menu == null) focusDock();
         appsByPkg = byPkg;
         loadShelf();
+    }
+
+    // Ordre personnalisé de la grille : les applis connues dans l'ordre choisi ; une appli inconnue
+    // (nouvelle, ou sortie du dock) se glisse après sa voisine alphabétique, jamais après Réglages.
+    private static List<AppEntry> ordered(List<AppEntry> alpha, List<String> order) {
+        if (order.isEmpty()) return alpha;
+        Map<String, Integer> rank = new HashMap<>();
+        for (int i = 0; i < order.size(); i++) rank.put(order.get(i), i);
+        List<AppEntry> out = new ArrayList<>();
+        for (AppEntry a : alpha) if (rank.containsKey(a.pkg)) out.add(a);
+        out.sort((a, b) -> Integer.compare(rank.get(a.pkg), rank.get(b.pkg)));
+        for (int i = 0; i < alpha.size(); i++) {
+            AppEntry a = alpha.get(i);
+            if (rank.containsKey(a.pkg)) continue;
+            int at = 0;
+            for (int k = i - 1; k >= 0; k--) {
+                int idx = out.indexOf(alpha.get(k));
+                if (idx >= 0) {
+                    at = idx + 1;
+                    break;
+                }
+            }
+            if (!Apps.SETTINGS_KEY.equals(a.pkg) && at > 0 && Apps.SETTINGS_KEY.equals(out.get(at - 1).pkg)) at--;
+            out.add(at, a);
+        }
+        return out;
     }
 
     private FrameLayout.LayoutParams shelfInfoLp() {
@@ -567,7 +655,8 @@ public class HomeActivity extends Activity {
     private void loadShelf() {
         Set<String> allowed = visiblePkgs;
         bg.execute(() -> {
-            Map<String, List<WatchNext.Item>> map = WatchNext.grouped(this, allowed, 6);
+            List<WatchNext.Item> all = WatchNext.all(this, allowed);
+            Map<String, List<WatchNext.Item>> map = WatchNext.grouped(all, 6);
             handler.post(() -> {
                 shelf = map;
                 View f = getCurrentFocus();
@@ -650,12 +739,18 @@ public class HomeActivity extends Activity {
         Bitmap cached = key == null ? null : artCache.get(key);
         if (cached != null) {
             displayBackdrop(cached);
-        } else if (key != null) {
+        } else if (key == null || failedArt.contains(key)) {
+            if (currentWall != null) displayBackdrop(currentWall);
+        } else {
             img.execute(() -> {
                 Bitmap bmp = loadArt(key, 1280);
                 handler.post(() -> {
                     if (bmp != null) artCache.put(key, bmp);
-                    if (token == shelfToken && shelfActive && bmp != null) displayBackdrop(bmp);
+                    else failedArt.add(key);
+                    if (token != shelfToken || !shelfActive) return;
+                    // Sans image, on garde le fond d'écran plutôt que le visuel du programme précédent.
+                    if (bmp != null) displayBackdrop(bmp);
+                    else if (currentWall != null) displayBackdrop(currentWall);
                 });
             });
         }
@@ -767,7 +862,7 @@ public class HomeActivity extends Activity {
         Tile t = new Tile(this, app, inDock, tileW, tileH, dp(14));
         t.setOnClickListener(v -> launch(app));
         t.setOnLongClickListener(v -> {
-            appMenu(app);
+            appMenu(t);
             return true;
         });
         return t;
@@ -782,10 +877,15 @@ public class HomeActivity extends Activity {
         }
     }
 
-    private void appMenu(AppEntry app) {
+    private void appMenu(Tile t) {
+        AppEntry app = t.app;
         if (Apps.SETTINGS_KEY.equals(app.pkg)) {
             int n = Apps.hidden(this).size();
-            openMenu(app.label, new String[]{"Réafficher les applis masquées (" + n + ")"}, -1, w -> {
+            openMenu(app.label, new String[]{"Déplacer", "Réafficher les applis masquées (" + n + ")"}, -1, w -> {
+                if (w == 0) {
+                    startMove(t);
+                    return;
+                }
                 Apps.showAll(this);
                 gridSig = "";
                 reloadApps();
@@ -793,8 +893,35 @@ public class HomeActivity extends Activity {
             });
             return;
         }
-        openMenu(app.label, new String[]{"Masquer de l'accueil", "Infos sur l'appli"}, -1, w -> {
-            if (w == 0) {
+        // Le dock tel qu'il est affiché : retirer ou ajouter une appli le rend personnalisé.
+        List<String> dock = new ArrayList<>();
+        for (int i = 0; i < dockRow.getChildCount(); i++) dock.add(((Tile) dockRow.getChildAt(i)).app.pkg);
+        List<String> items = new ArrayList<>();
+        items.add("Déplacer");
+        if (!t.inDock) items.add("Ajouter au dock");
+        else if (dock.size() > 1) items.add("Retirer du dock");
+        items.add("Masquer de l'accueil");
+        items.add("Infos sur l'appli");
+        String[] labels = items.toArray(new String[0]);
+        openMenu(app.label, labels, -1, w -> {
+            String it = labels[w];
+            if (it.equals("Déplacer")) {
+                startMove(t);
+            } else if (it.equals("Retirer du dock")) {
+                dock.remove(app.pkg);
+                Apps.setPinned(this, dock);
+                reloadApps();
+                notice(app.label + " est retirée du dock");
+            } else if (it.equals("Ajouter au dock")) {
+                if (dock.size() >= DOCK_COUNT) {
+                    notice("Le dock est plein : retire d'abord une appli");
+                    return;
+                }
+                dock.add(app.pkg);
+                Apps.setPinned(this, dock);
+                reloadApps();
+                notice(app.label + " est ajoutée au dock");
+            } else if (it.equals("Masquer de l'accueil")) {
                 Apps.setHidden(this, app.pkg, true);
                 gridSig = "";
                 reloadApps();
@@ -809,21 +936,105 @@ public class HomeActivity extends Activity {
         });
     }
 
+    // Mode « Déplacer » : flèches pour changer de place, OK ou Retour pour terminer.
+    private void startMove(Tile t) {
+        if (!t.isAttachedToWindow()) return;
+        int limit;
+        if (t.inDock) {
+            // Le dock affiché est épinglé tel quel : la place choisie ne bougera plus avec les applis récentes.
+            List<String> dock = new ArrayList<>();
+            for (int i = 0; i < dockRow.getChildCount(); i++) dock.add(((Tile) dockRow.getChildAt(i)).app.pkg);
+            Apps.setPinned(this, dock);
+            limit = dock.size();
+        } else {
+            limit = grid.getChildCount();
+        }
+        moving = t;
+        moveLimit = limit;
+        t.requestFocus();
+        t.wiggle(true);
+        notice("Flèches pour déplacer, OK pour terminer");
+    }
+
+    private void moveBy(int dx, int dy) {
+        if (moving.inDock && dy != 0) return;
+        ViewGroup parent = (ViewGroup) moving.getParent();
+        int i = parent.indexOfChild(moving);
+        int j = i + dx + (moving.inDock ? 0 : dy * COLS);
+        if (j < 0 || j >= moveLimit || j == i) return;
+        reordering = true;
+        parent.removeViewAt(i);
+        parent.addView(moving, j);
+        relayout(parent);
+        moving.requestFocus();
+        reordering = false;
+        List<String> pkgs = new ArrayList<>();
+        StringBuilder sig = new StringBuilder();
+        for (int k = 0; k < parent.getChildCount(); k++) {
+            AppEntry a = ((Tile) parent.getChildAt(k)).app;
+            pkgs.add(a.pkg);
+            sig.append(a.pkg).append('|').append(a.label).append(',');
+        }
+        if (moving.inDock) {
+            Apps.setPinned(this, pkgs.subList(0, moveLimit));
+            dockSig = TextUtils.join(",", pkgs);
+        } else {
+            Apps.setOrder(this, pkgs);
+            gridSig = sig.toString();
+        }
+    }
+
+    private void endMove() {
+        Tile t = moving;
+        moving = null;
+        t.wiggle(false);
+        handler.post(hideNotice);
+        reloadApps();
+    }
+
+    private void relayout(ViewGroup parent) {
+        for (int k = 0; k < parent.getChildCount(); k++) {
+            View c = parent.getChildAt(k);
+            if (parent == grid) {
+                GridLayout.LayoutParams lp = (GridLayout.LayoutParams) c.getLayoutParams();
+                lp.setMargins(0, 0, (k % COLS) < COLS - 1 ? dp(16) : 0, dp(14));
+                c.setLayoutParams(lp);
+            } else {
+                LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) c.getLayoutParams();
+                lp.leftMargin = k > 0 ? dp(16) : 0;
+                c.setLayoutParams(lp);
+            }
+        }
+    }
+
     private void settingsMenu() {
         int excluded = WatchNext.excluded(this).size();
         int appsHidden = Apps.hidden(this).size();
-        String[] items = {"Catégories", "Durée entre chaque image", "À suivre", "Applications sur l'accueil", "Plus de réglages"};
+        String[] items = {"Catégories", "Durée entre chaque image", "À suivre", "Applications sur l'accueil", "Sons de navigation", "Plus de réglages"};
         String[] details = {Walls.label(walls.theme()), Walls.intervalLabel(walls.interval()),
                 excluded == 0 ? "Toutes les applis" : excluded + (excluded > 1 ? " masquées" : " masquée"),
                 appsHidden == 0 ? "Toutes affichées" : appsHidden + (appsHidden > 1 ? " masquées" : " masquée"),
-                "Tous les paramètres"};
+                sounds.enabled() ? "Activés" : "Désactivés", "Tous les paramètres"};
         openMenu("Réglages", currentCaption, items, details, -1, w -> {
             if (w == 0) chooseTheme();
             else if (w == 1) chooseInterval();
             else if (w == 2) chooseUpNext();
             else if (w == 3) chooseApps();
+            else if (w == 4) chooseSounds();
             else openSystemSettings();
         }, null);
+    }
+
+    private void chooseSounds() {
+        openMenu("Sons de navigation", new String[]{"Activés", "Désactivés"}, null, sounds.enabled() ? 0 : 1, w -> {
+            sounds.setEnabled(w == 0);
+            notice(w == 0 ? "Sons de navigation activés" : "Sons de navigation désactivés");
+        }, this::settingsMenu);
+    }
+
+    private void openControl() {
+        startActivity(new Intent(this, ControlActivity.class));
+        overridePendingTransition(0, 0);
     }
 
     private void inputsMenu() {
@@ -977,14 +1188,14 @@ public class HomeActivity extends Activity {
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(10), dp(20), dp(10), dp(12));
+        card.setPadding(dp(2), dp(20), dp(2), dp(12));
         menuGlass = glass(card, dp(28), 0xA6101216);
         card.setBackground(menuGlass);
         TextView t = text(19, 0xFFFFFFFF, 600);
         t.setText(title);
         t.setSingleLine(true);
         t.setEllipsize(TextUtils.TruncateAt.END);
-        t.setPadding(dp(18), 0, dp(18), dp(14));
+        t.setPadding(dp(26), 0, dp(26), dp(14));
         card.addView(t);
         if (info != null && !info.isEmpty()) card.addView(artwork(info));
 
@@ -993,9 +1204,13 @@ public class HomeActivity extends Activity {
         list.setVerticalScrollBarEnabled(false);
         list.setOverScrollMode(View.OVER_SCROLL_NEVER);
         list.setClipToPadding(false);
-        list.setPadding(0, dp(4), 0, dp(4));
+        // Marge dans la liste (et non dans la carte) : la ligne agrandie au focus peut y déborder sans être rognée.
+        list.setPadding(dp(8), dp(4), dp(8), dp(4));
+        list.setClipChildren(false);
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
+        rows.setClipChildren(false);
+        rows.setClipToPadding(false);
         list.addView(rows);
         for (int i = 0; i < items.length; i++) {
             boolean on = toggles != null ? toggles[i] : i == checked;
@@ -1024,6 +1239,7 @@ public class HomeActivity extends Activity {
         scroll.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         themeButton.setFocusable(false);
         inputsButton.setFocusable(false);
+        controlButton.setFocusable(false);
         btnPlay.setFocusable(false);
         btnInfo.setFocusable(false);
         blurView.animate().alpha(1f).setDuration(250).withEndAction(this::syncWall).start();
@@ -1070,7 +1286,7 @@ public class HomeActivity extends Activity {
         credit.setPadding(0, dp(4), 0, 0);
         box.addView(credit);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(dp(8), 0, dp(8), dp(10));
+        lp.setMargins(dp(16), 0, dp(16), dp(10));
         box.setLayoutParams(lp);
         return box;
     }
@@ -1130,6 +1346,7 @@ public class HomeActivity extends Activity {
         scroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         themeButton.setFocusable(true);
         inputsButton.setFocusable(true);
+        controlButton.setFocusable(true);
         btnPlay.setFocusable(shelfFocused);
         btnInfo.setFocusable(shelfFocused);
         onScroll(scroll.getScrollY());
@@ -1144,7 +1361,10 @@ public class HomeActivity extends Activity {
     }
 
     private void onFocus(View v) {
-        if (v == themeButton || v == inputsButton || v == btnPlay || v == btnInfo) {
+        if (reordering) return;
+        // Son seulement pour un déplacement fait à la télécommande, pas quand le code replace le focus.
+        if (v != null && SystemClock.uptimeMillis() - keyAt < 250) sounds.move();
+        if (v == themeButton || v == inputsButton || v == controlButton || v == btnPlay || v == btnInfo) {
             smoothScroll(0);
             return;
         }
@@ -1198,6 +1418,7 @@ public class HomeActivity extends Activity {
             dockPanel.setTranslationY(pin);
         }
         dockPanel.invalidate();
+        pill.setAlpha(Math.max(0f, 1f - y / (float) dp(120)));
     }
 
     // Fond net masqué quand le flou le recouvre entièrement : son zoom lent ne coûte alors plus rien au GPU.
@@ -1217,6 +1438,8 @@ public class HomeActivity extends Activity {
     }
 
     private void displayBackdrop(Bitmap bmp) {
+        if (bmp == shownBackdrop) return;
+        shownBackdrop = bmp;
         ImageView incoming = wallBack;
         ImageView outgoing = wallFront;
         root.removeView(incoming);
@@ -1287,6 +1510,10 @@ public class HomeActivity extends Activity {
         boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
         if (down) {
             resetIdle();
+            Tile.steer(code);
+            keyAt = SystemClock.uptimeMillis();
+            if ((code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) && e.getRepeatCount() == 0 && !fullscreen
+                    && getCurrentFocus() != null) sounds.select();
             zoomHeld = true;
             if (zoom != null) zoom.pause();
             handler.removeCallbacks(resumeZoom);
@@ -1303,6 +1530,14 @@ public class HomeActivity extends Activity {
             }
             return super.dispatchKeyEvent(e);
         }
+        if (moving != null) {
+            if (down && code == KeyEvent.KEYCODE_DPAD_LEFT) moveBy(-1, 0);
+            else if (down && code == KeyEvent.KEYCODE_DPAD_RIGHT) moveBy(1, 0);
+            else if (down && code == KeyEvent.KEYCODE_DPAD_UP) moveBy(0, -1);
+            else if (down && code == KeyEvent.KEYCODE_DPAD_DOWN) moveBy(0, 1);
+            else if (!down && (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_BACK)) endMove();
+            return true;
+        }
         if (fullscreen) {
             if (!down) {
                 if (swallowUp) swallowUp = false;
@@ -1311,7 +1546,15 @@ public class HomeActivity extends Activity {
             return true;
         }
         View f = getCurrentFocus();
-        boolean top = f == themeButton || f == inputsButton;
+        // OK maintenu : les télécommandes répètent la touche ; on ouvre le menu de l'appli une seule fois.
+        if (down && (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) && e.getRepeatCount() > 0 && f instanceof Tile) {
+            if (e.getRepeatCount() == 1) {
+                f.cancelLongPress();
+                f.performLongClick();
+            }
+            return true;
+        }
+        boolean top = f == themeButton || f == inputsButton || f == controlButton;
         boolean btn = f == btnPlay || f == btnInfo;
         if (code == KeyEvent.KEYCODE_DPAD_UP && down) {
             if (f instanceof Tile && ((Tile) f).inDock) {
@@ -1352,10 +1595,18 @@ public class HomeActivity extends Activity {
             return true;
         }
         if (top && (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT)) {
-            if (down && code == KeyEvent.KEYCODE_DPAD_LEFT && f == themeButton && inputsButton.getVisibility() == View.VISIBLE) {
-                inputsButton.requestFocus();
-            } else if (down && code == KeyEvent.KEYCODE_DPAD_RIGHT && f == inputsButton) {
-                themeButton.requestFocus();
+            if (down) {
+                // Boutons de la pastille de gauche à droite, en sautant ceux qui sont masqués.
+                View[] pill = {inputsButton, controlButton, themeButton};
+                int i = 0;
+                while (pill[i] != f) i++;
+                int dir = code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
+                for (int j = i + dir; j >= 0 && j < pill.length; j += dir) {
+                    if (pill[j].getVisibility() == View.VISIBLE) {
+                        pill[j].requestFocus();
+                        break;
+                    }
+                }
             }
             return true;
         }

@@ -25,11 +25,13 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 final class Walls {
     interface Listener {
@@ -39,6 +41,7 @@ final class Walls {
     private static final String UA = "TVHomeLauncher/1.0 (personal Android TV launcher)";
     static final String[][] THEMES = {
             {"all", "Tout, en mélange"},
+            {"auto", "Selon l'heure"},
             {"nature", "Nature et paysages"},
             {"mountains", "Montagnes"},
             {"water", "Lacs et rivières"},
@@ -66,7 +69,7 @@ final class Walls {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Random rnd = new Random();
     private final List<String> queue = new ArrayList<>();
-    private String current = "";
+    private String current = "", shown = "";
 
     Walls(Context ctx) {
         this.ctx = ctx.getApplicationContext();
@@ -74,8 +77,39 @@ final class Walls {
         dir.mkdirs();
     }
 
+    void close() {
+        io.shutdownNow();
+    }
+
+    private void run(Runnable r) {
+        if (io.isShutdown()) return;
+        try {
+            io.execute(r);
+        } catch (RejectedExecutionException ignored) {
+        }
+    }
+
+    // Légende lisible : sans les balises Wikidata (« QS:P1476,… ») ni les espaces superflus,
+    // en gardant le séparateur « · » entre lieu, auteur et licence.
+    static String clean(String caption) {
+        if (caption == null) return "";
+        StringBuilder out = new StringBuilder();
+        String[] parts = caption.split(" {2}· {2}");
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i];
+            int qs = part.indexOf("QS:");
+            if (qs >= 0) part = part.substring(0, qs);
+            part = part.replace('\uFFFC', ' ').replaceAll("\\s+", " ").trim();
+            // Le lieu reste en première position, même vide, pour ne pas prendre l'auteur pour un lieu.
+            if (part.isEmpty() && i > 0) continue;
+            if (i > 0) out.append("  ·  ");
+            out.append(part);
+        }
+        return out.toString().trim().isEmpty() ? "" : out.toString();
+    }
+
     void next(Listener listener) {
-        io.execute(() -> {
+        run(() -> {
             String key = pick();
             Bitmap bmp = decode(key);
             if (bmp == null) {
@@ -84,7 +118,8 @@ final class Walls {
             }
             if (bmp == null) return;
             current = key;
-            String caption = caption(key);
+            Log.i("TVHome", "walls: " + theme() + " -> " + shown + " : " + new File(key).getName());
+            String caption = clean(caption(key));
             Bitmap result = bmp;
             main.post(() -> listener.onWall(result, caption));
         });
@@ -122,16 +157,27 @@ final class Walls {
 
     void setTheme(String theme) {
         prefs().edit().putString("theme", theme).apply();
-        io.execute(queue::clear);
+        run(queue::clear);
     }
 
     boolean hasPhotos(String theme) {
+        theme = effective(theme, hour());
         return "illustrations".equals(theme) || !photos(theme).isEmpty();
     }
 
+    // « Selon l'heure » : paysages lumineux le jour, nuit et étoiles le soir et la nuit.
+    static String effective(String theme, int hour) {
+        if (!"auto".equals(theme)) return theme;
+        return hour >= 7 && hour < 19 ? "nature" : "night";
+    }
+
+    private static int hour() {
+        return Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+    }
+
     void refreshIfNeeded(Runnable onFirstPhotos) {
-        io.execute(() -> {
-            String theme = theme();
+        run(() -> {
+            String theme = effective(theme(), hour());
             if ("illustrations".equals(theme)) return;
             String key = "lastFetch_" + theme;
             long last = prefs().getLong(key, 0);
@@ -174,8 +220,16 @@ final class Walls {
     }
 
     private String pick() {
+        String effective = effective(theme(), hour());
+        if (!effective.equals(shown)) {
+            // Changement de tranche horaire : nouvelle file, et téléchargement si besoin.
+            boolean switched = !shown.isEmpty();
+            shown = effective;
+            queue.clear();
+            if (switched) refreshIfNeeded(null);
+        }
         if (queue.isEmpty()) {
-            String theme = theme();
+            String theme = effective;
             List<File> files = "illustrations".equals(theme) ? new ArrayList<>() : photos(theme);
             if (files.size() >= 3) {
                 for (File f : files) queue.add(f.getAbsolutePath());

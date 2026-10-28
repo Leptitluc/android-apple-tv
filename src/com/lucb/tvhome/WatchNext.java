@@ -70,10 +70,15 @@ final class WatchNext {
         return load(ctx, allowed, excluded(ctx), max);
     }
 
-    static Map<String, List<Item>> grouped(Context ctx, Set<String> allowed, int perApp) {
+    // Tous les programmes publiés, en une seule requête.
+    static List<Item> all(Context ctx, Set<String> allowed) {
+        return raw(ctx, allowed, excluded(ctx));
+    }
+
+    static Map<String, List<Item>> grouped(List<Item> all, int perApp) {
         Map<String, List<Item>> out = new LinkedHashMap<>();
         Map<String, Set<String>> titles = new HashMap<>();
-        for (Item it : raw(ctx, allowed, excluded(ctx))) {
+        for (Item it : all) {
             List<Item> list = out.get(it.pkg);
             if (list == null) {
                 list = new ArrayList<>();

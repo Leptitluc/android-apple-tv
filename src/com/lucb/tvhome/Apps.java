@@ -17,6 +17,7 @@ import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.provider.Settings;
+import android.text.TextUtils;
 
 import java.text.Collator;
 import java.util.ArrayList;
@@ -59,6 +60,32 @@ final class Apps {
         if (hide) set.add(pkg);
         else set.remove(pkg);
         prefs(ctx).edit().putStringSet("hidden", set).apply();
+        if (hide) {
+            List<String> pinned = pinned(ctx);
+            if (pinned.remove(pkg)) setPinned(ctx, pinned);
+        }
+    }
+
+    // Applis épinglées au dock, dans l'ordre choisi.
+    static List<String> pinned(Context ctx) {
+        return split(prefs(ctx).getString("dock", ""));
+    }
+
+    static void setPinned(Context ctx, List<String> pkgs) {
+        prefs(ctx).edit().putString("dock", TextUtils.join(",", pkgs)).apply();
+    }
+
+    // Ordre personnalisé de la grille ; vide = ordre alphabétique.
+    static List<String> order(Context ctx) {
+        return split(prefs(ctx).getString("order", ""));
+    }
+
+    static void setOrder(Context ctx, List<String> pkgs) {
+        prefs(ctx).edit().putString("order", TextUtils.join(",", pkgs)).apply();
+    }
+
+    private static List<String> split(String raw) {
+        return raw.isEmpty() ? new ArrayList<>() : new ArrayList<>(Arrays.asList(raw.split(",")));
     }
 
     static void showAll(Context ctx) {

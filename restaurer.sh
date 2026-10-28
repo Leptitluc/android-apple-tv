@@ -43,13 +43,15 @@ for k in window_animation_scale transition_animation_scale animator_duration_sca
   [ -n "$v" ] && sh settings put global "$k" "$v" || sh settings delete global "$k" >/dev/null
 done
 for k in screensaver_enabled screensaver_activate_on_sleep screensaver_activate_on_dock screensaver_components; do
-  v="$(grep "^$k=" "$BACKUP/reglages-secure.txt" | cut -d= -f2-)"; [ -n "$v" ] && sh settings put secure "$k" "$v"
+  v="$(grep "^$k=" "$BACKUP/reglages-secure.txt" | cut -d= -f2-)"
+  if [ -n "$v" ]; then sh settings put secure "$k" "$v"; else sh settings delete secure "$k" >/dev/null; fi
 done
 v="$(grep "^enabled_accessibility_services=" "$BACKUP/reglages-secure.txt" | cut -d= -f2-)"
 if [ -n "$v" ] && [ "$v" != "null" ]; then sh settings put secure enabled_accessibility_services "$v"; else sh settings delete secure enabled_accessibility_services >/dev/null; fi
 sh settings put secure accessibility_enabled "$(grep "^accessibility_enabled=" "$BACKUP/reglages-secure.txt" | cut -d= -f2- || echo 0)"
 HOME_ACT="$(sed -n '2p' "$BACKUP/launcher-actuel.txt")"
 if sh pm list packages | grep -qx "package:$PKG"; then
+  sh cmd notification disallow_listener "$PKG/$PKG.MediaListener" >/dev/null 2>&1
   [ -n "$HOME_ACT" ] && sh cmd package set-home-activity "$HOME_ACT" >/dev/null
   sh pm uninstall "$PKG" >/dev/null
 fi
