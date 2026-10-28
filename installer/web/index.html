@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accueil TV</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><img src="icon.svg" alt=""><span>Accueil TV</span></div>
+  <div class="lang" role="group" aria-label="Langue / Language">
+    <button data-lang="fr">Français</button><button data-lang="en">English</button>
+  </div>
+</header>
+
+<main>
+  <section id="s-welcome" class="screen">
+    <img class="hero" src="icon.svg" alt="">
+    <h1 data-t="welcomeTitle"></h1>
+    <p class="lead" data-t="welcomeLead"></p>
+    <ul class="checks">
+      <li data-t="welcome1"></li>
+      <li data-t="welcome2"></li>
+      <li data-t="welcome3"></li>
+    </ul>
+    <div class="actions">
+      <button class="primary" id="go-install" data-t="start"></button>
+    </div>
+    <p class="aside"><a href="#" id="go-restore" data-t="restoreLink"></a></p>
+  </section>
+
+  <section id="s-prep" class="screen">
+    <p class="kicker" data-t="step1"></p>
+    <h1 data-t="prepTitle"></h1>
+    <p class="lead" data-t="prepLead"></p>
+    <ol class="cards">
+      <li><span class="num">1</span><div><h3 data-t="prep1Title"></h3><p data-t="prep1"></p></div></li>
+      <li><span class="num">2</span><div><h3 data-t="prep2Title"></h3><p data-t="prep2"></p></div></li>
+      <li><span class="num">3</span><div><h3 data-t="prep3Title"></h3><p data-t="prep3"></p></div></li>
+    </ol>
+    <label class="confirm"><input type="checkbox" id="prep-done"><span data-t="prepDone"></span></label>
+    <div class="actions">
+      <button class="secondary" data-back="s-welcome" data-t="back"></button>
+      <button class="primary" id="prep-next" disabled data-t="continue"></button>
+    </div>
+  </section>
+
+  <section id="s-ip" class="screen">
+    <p class="kicker" data-t="step2"></p>
+    <h1 data-t="ipTitle"></h1>
+    <p class="lead" data-t="ipLead"></p>
+    <div class="found">
+      <p class="label"><span class="spinner small" id="scan-spin"></span><span id="scan-text"></span></p>
+      <div id="found-list" class="chips"></div>
+    </div>
+    <label class="field">
+      <span data-t="ipLabel"></span>
+      <input id="ip" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="192.168.1.20">
+    </label>
+    <p class="hint" data-t="ipHint"></p>
+    <div class="actions">
+      <button class="secondary" data-back="s-prep" data-t="back"></button>
+      <button class="primary" id="ip-next" disabled data-t="connect"></button>
+    </div>
+  </section>
+
+  <section id="s-connect" class="screen center">
+    <div class="tv-illus" id="tv-illus">
+      <div class="tv"><div class="dialog"><b data-t="tvDialogTitle"></b><span data-t="tvDialogText"></span><i data-t="tvDialogAllow"></i></div></div>
+    </div>
+    <div class="spinner big" id="connect-spin"></div>
+    <h1 id="connect-title"></h1>
+    <p class="lead" id="connect-text"></p>
+    <div class="actions" id="connect-actions" hidden>
+      <button class="secondary" data-back="s-ip" data-t="back"></button>
+      <button class="primary" id="connect-retry" data-t="retry"></button>
+    </div>
+  </section>
+
+  <section id="s-options" class="screen">
+    <p class="kicker" data-t="step3"></p>
+    <h1 id="opt-title"></h1>
+    <p class="lead" id="opt-lead"></p>
+    <ul class="checks">
+      <li data-t="sum1"></li>
+      <li data-t="sum2"></li>
+      <li data-t="sum3"></li>
+      <li data-t="sum4"></li>
+    </ul>
+    <div id="opt-apps" hidden>
+      <h3 data-t="optAppsTitle"></h3>
+      <p class="hint" data-t="optAppsHint"></p>
+      <div id="opt-list" class="toggles"></div>
+    </div>
+    <div class="actions">
+      <button class="secondary" data-back="s-ip" data-t="back"></button>
+      <button class="primary" id="do-install" data-t="install"></button>
+    </div>
+  </section>
+
+  <section id="s-restore" class="screen">
+    <h1 id="rest-title"></h1>
+    <p class="lead" data-t="restLead"></p>
+    <ul class="checks">
+      <li data-t="rest1"></li>
+      <li data-t="rest2"></li>
+      <li data-t="rest3"></li>
+    </ul>
+    <div class="actions">
+      <button class="secondary" data-back="s-welcome" data-t="cancel"></button>
+      <button class="danger" id="do-restore" data-t="restoreNow"></button>
+    </div>
+  </section>
+
+  <section id="s-run" class="screen">
+    <h1 id="run-title"></h1>
+    <p class="lead" data-t="runLead"></p>
+    <ul id="steps" class="steps"></ul>
+    <div class="actions" id="run-actions" hidden>
+      <button class="secondary" data-back="s-ip" data-t="back"></button>
+      <button class="primary" id="run-retry" data-t="retry"></button>
+    </div>
+  </section>
+
+  <section id="s-done" class="screen center">
+    <div class="done-mark">✓</div>
+    <h1 id="done-title"></h1>
+    <p class="lead" id="done-text"></p>
+    <img id="done-shot" class="shot" alt="" hidden>
+    <p class="hint" id="done-hint"></p>
+    <div class="actions">
+      <button class="primary" id="quit" data-t="quit"></button>
+    </div>
+  </section>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="sheet">
+    <p id="modal-text"></p>
+    <div class="actions">
+      <button class="secondary" id="modal-no" data-t="no"></button>
+      <button class="primary" id="modal-yes" data-t="yes"></button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

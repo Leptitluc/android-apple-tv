@@ -11,18 +11,27 @@ Open source (MIT). Rien n'est désinstallé, tout est réversible.
 
 ---
 
-## Installation en une commande
+## Installation
 
-Sur **ton ordinateur** (même Wi-Fi que la télé), colle ceci dans un terminal :
+Télécharge l'installateur de ton ordinateur et ouvre-le :
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Leptitluc/android-apple-tv/main/install.sh)
-```
+- **macOS** (Intel et Apple Silicon, macOS 12 ou plus) : [AccueilTV-Installer-macOS.dmg](https://github.com/Leptitluc/android-apple-tv/releases/latest/download/AccueilTV-Installer-macOS.dmg)
+- **Windows** (10 et 11) : [AccueilTV-Installer-Windows.exe](https://github.com/Leptitluc/android-apple-tv/releases/latest/download/AccueilTV-Installer-Windows.exe)
 
-L'assistant commence par te demander ta langue (français ou anglais), puis te guide pas à pas : il explique comment activer le débogage sur la télé, trouve
-l'appareil, **fait une sauvegarde**, allège le système (pubs, télémétrie, applis inutiles — en te
-demandant pour celles que tu pourrais utiliser), installe Accueil TV, met en place le bouton
-réglages et le définit comme accueil par défaut. Environ 5 minutes.
+L'installateur s'ouvre dans ton navigateur, en français ou en anglais. Il t'explique quoi faire sur
+la télé, la trouve sur ton réseau, **fait une sauvegarde**, télécharge le nécessaire (les outils
+Android et Accueil TV) et installe tout automatiquement : allègement (pubs, télémétrie, applis de
+démonstration — tu choisis pour les applis que tu pourrais utiliser), bouton réglages, économiseur
+d'écran et accueil par défaut. Environ 5 minutes. Relance-le et choisis « Tout annuler » pour remettre
+la télé comme avant.
+
+**Premier lancement :** les installateurs ne sont pas signés avec un certificat payant d'Apple ou de
+Microsoft, donc le système te prévient une fois.
+- **macOS 15 et plus récent** : ouvre l'appli, clique sur « OK », puis va dans **Réglages Système →
+  Confidentialité et sécurité** et clique sur **« Ouvrir quand même »** en bas. Sur macOS 12 à 14 :
+  clic droit sur l'appli → **Ouvrir**.
+- **Windows** : sur « Windows a protégé votre ordinateur », clique sur **« Informations
+  complémentaires »** → **« Exécuter quand même »**.
 
 ### À faire d'abord sur la télé (une seule fois)
 
@@ -34,7 +43,17 @@ réglages et le définit comme accueil par défaut. Environ 5 minutes.
 Pendant l'installation, la télé affichera **« Autoriser le débogage USB ? »** : accepte et coche
 **« Toujours autoriser »**.
 
-### Sans curl (en clonant le dépôt)
+### Avancé : en ligne de commande (macOS / Linux)
+
+Sur **ton ordinateur** (même Wi-Fi que la télé), colle ceci dans un terminal :
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Leptitluc/android-apple-tv/main/install.sh)
+```
+
+Le script demande ta langue, puis fait les mêmes étapes que l'installateur, dans le terminal.
+
+Sans curl (en clonant le dépôt) :
 
 ```bash
 git clone https://github.com/Leptitluc/android-apple-tv.git
@@ -93,6 +112,9 @@ sur le menu d'origine.
 
 ## Tout annuler
 
+Rouvre l'installateur et choisis **« Tout annuler sur une télé déjà installée »**. Il utilise la
+sauvegarde faite à l'installation : lance-le depuis le même ordinateur. En ligne de commande :
+
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Leptitluc/android-apple-tv/main/restaurer.sh)
 ```
@@ -111,6 +133,17 @@ sdkmanager "build-tools;34.0.0" "platforms;android-34"
 
 Pas de Gradle : `build.sh` enchaîne aapt2 → javac → d8 → zipalign → apksigner. Garde le fichier
 `accueil-tv.keystore` créé au premier build pour signer tes futures versions avec la même clé.
+
+Les installateurs (Go, sans dépendance) se construisent sur un Mac :
+
+```bash
+brew install go
+installer/build.sh 1.0.0   # produit installer/dist/AccueilTV-Installer-macOS.dmg et -Windows.exe
+```
+
+Publie les deux fichiers dans une « release » GitHub pour que les liens de téléchargement ci-dessus
+fonctionnent. Pour essayer l'installateur sans toucher à la télé : depuis le dossier `installer`,
+`go run . -dry-run`.
 
 ## Sécurité et vie privée
 

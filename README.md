@@ -11,18 +11,24 @@ Open source (MIT). Nothing is uninstalled, everything can be undone.
 
 ---
 
-## One-command install
+## Install
 
-On **your computer** (same Wi-Fi as the TV), paste this into a terminal:
+Download the installer for your computer and open it:
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Leptitluc/android-apple-tv/main/install.sh)
-```
+- **macOS** (Intel and Apple Silicon, macOS 12+): [AccueilTV-Installer-macOS.dmg](https://github.com/Leptitluc/android-apple-tv/releases/latest/download/AccueilTV-Installer-macOS.dmg)
+- **Windows** (10 and 11): [AccueilTV-Installer-Windows.exe](https://github.com/Leptitluc/android-apple-tv/releases/latest/download/AccueilTV-Installer-Windows.exe)
 
-The assistant first asks for your language (English or French), then walks you through each step:
-it explains how to enable debugging on the TV, finds the device, **makes a backup**, slims down the
-system (ads, telemetry, useless apps — asking you about the ones you might use), installs
-Accueil TV, sets up the settings button and makes it the default home screen. About 5 minutes.
+The installer opens in your web browser, in English or French. It tells you what to do on the TV,
+finds the TV on your network, **makes a backup**, downloads what it needs (the Android tools and
+Accueil TV) and installs everything automatically: slimming down (ads, telemetry, demo apps — you
+pick the apps you might use), the settings button, the screensaver and the default home screen.
+About 5 minutes. Run it again and choose « Tout annuler » / "Undo everything" to put the TV back.
+
+**First launch:** the installers are not signed with a paid Apple or Microsoft certificate, so the
+system warns you once.
+- **macOS 15 and later**: open the app, click "Done", then go to **System Settings → Privacy &
+  Security** and click **"Open Anyway"** at the bottom. On macOS 12–14: right-click the app → **Open**.
+- **Windows**: on "Windows protected your PC", click **"More info"** → **"Run anyway"**.
 
 ### Do this on the TV first (just once)
 
@@ -34,7 +40,17 @@ Accueil TV, sets up the settings button and makes it the default home screen. Ab
 During the install, the TV will show **"Allow USB debugging?"**: accept and tick
 **"Always allow from this computer"**.
 
-### Without curl (by cloning the repo)
+### Advanced: command line (macOS / Linux)
+
+On **your computer** (same Wi-Fi as the TV), paste this into a terminal:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Leptitluc/android-apple-tv/main/install.sh)
+```
+
+The script asks for your language, then does the same steps as the installer in the terminal.
+
+Without curl (by cloning the repo):
 
 ```bash
 git clone https://github.com/Leptitluc/android-apple-tv.git
@@ -94,6 +110,9 @@ menu.
 
 ## Undo everything
 
+Open the installer again and choose **"Undo everything on a TV that already has it"**. It uses the
+backup made during the install, so run it from the same computer. From the command line:
+
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Leptitluc/android-apple-tv/main/restaurer.sh)
 ```
@@ -112,6 +131,16 @@ sdkmanager "build-tools;34.0.0" "platforms;android-34"
 
 No Gradle: `build.sh` chains aapt2 → javac → d8 → zipalign → apksigner. Keep the
 `accueil-tv.keystore` file created on the first build to sign future versions with the same key.
+
+The installers (Go, no dependencies) are built on a Mac:
+
+```bash
+brew install go
+installer/build.sh 1.0.0   # produces installer/dist/AccueilTV-Installer-macOS.dmg and -Windows.exe
+```
+
+Publish both files in a GitHub release so the download links above work. To try the installer
+without changing the TV: from the `installer` folder, `go run . -dry-run`.
 
 ## Security and privacy
 

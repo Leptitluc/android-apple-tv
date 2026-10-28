@@ -4,3 +4,5 @@ config.properties
 /sauvegarde-*/
 .DS_Store
 *.idsig
+installer/dist/
+installer/build/
