@@ -85,7 +85,10 @@ Pour sauter la question de la langue, ajoute `ACCUEIL_TV_LANG=fr` (ou `en`) deva
 - **Des fonds d'écran** qui tournent (nature, art, architecture, nuit… réglable), avec crédits. La
   catégorie « Selon l'heure » montre des paysages lumineux le jour et des ciels étoilés le soir.
 - **« À suivre »** : arrête-toi sur une appli du dock et ses derniers programmes s'affichent en plein
-  écran, comme le « top shelf » de tvOS, repris là où tu t'étais arrêté.
+  écran, comme le « top shelf » de tvOS, repris là où tu t'étais arrêté. Les applis sans programme en
+  cours montrent leurs recommandations à la place (par exemple les recommandations YouTube). Un visuel à
+  la résolution de l'écran s'affiche en plein écran ; plus petit, il devient une vignette nette sur fond
+  flouté, jamais étirée.
 - **Menu rapide** sur l'accueil : catégories de fond d'écran, durée, quelles applis nourrissent
   « À suivre », afficher/masquer les applis, et « Plus de réglages ».
 - **Les entrées** (HDMI, AV, antenne…) à portée de clic, à côté de l'heure, avec le nom des

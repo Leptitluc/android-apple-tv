@@ -4,7 +4,7 @@ import android.animation.ObjectAnimator;
 import android.animation.PropertyValuesHolder;
 import android.app.Activity;
 import android.graphics.BitmapFactory;
-import android.util.LruCache;
+import android.graphics.Canvas;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -46,6 +46,8 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +69,8 @@ public class HomeActivity extends Activity {
     private static final long IDLE_MS = 90_000;
     private static final long ZOOM_PAUSE_MS = 4_000;
     private static final long SHELF_DELAY_MS = 400;
+    private static final int BAND_TOP = 80;
+    private static final long ART_CACHE_BYTES = 40L * 1024 * 1024;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService bg = Executors.newSingleThreadExecutor();
@@ -97,14 +101,17 @@ public class HomeActivity extends Activity {
     private View menuReturnFocus;
     private Runnable menuBack;
     private Glass menuGlass;
-    private View shelfScrim;
-    private LinearLayout shelfInfo, shelfDots, shelfButtons, btnPlay, btnInfo;
+    private FrameLayout shelfInfo;
+    private LinearLayout shelfText, shelfDots, shelfButtons, btnPlay;
+    private ImageView shelfThumb;
+    private Bitmap blurSrc, blurBg, wallRaw, wallShelfSrc, wallShelf;
     private TextView shelfApp, shelfTitle, shelfDetail, btnPlayLabel;
     private FrameLayout shelfTrack;
     private View shelfFill;
     private Bitmap currentWall;
     private Map<String, List<WatchNext.Item>> shelf = new HashMap<>();
-    private final LruCache<String, Bitmap> artCache = new LruCache<>(6);
+    // Visuels déjà chargés, du plus ancien au plus récent consulté ; limité en octets (un visuel 1080p fait ~8 Mo).
+    private final LinkedHashMap<String, Bitmap> artCache = new LinkedHashMap<>(8, 0.75f, true);
     private final Set<String> failedArt = new HashSet<>();
     private Bitmap shownBackdrop;
     private String shelfPkg;
@@ -199,21 +206,10 @@ public class HomeActivity extends Activity {
         blurView.setAlpha(0f);
         root.addView(blurView, match());
 
-        View scrim = overlay();
-        scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x4D000000, 0x00000000, 0x00000000, 0x1A000000, 0x8C000000}));
-        root.addView(scrim, match());
-
         dim = overlay();
         dim.setBackgroundColor(0xFF000000);
         dim.setAlpha(0f);
         root.addView(dim, match());
-
-        shelfScrim = overlay();
-        shelfScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xB3000000, 0x73000000, 0x14000000, 0x00000000}));
-        shelfScrim.setAlpha(0f);
-        root.addView(shelfScrim, match());
 
         scroll = new FocusScroll(this);
         scroll.setOnScroll(this::onScroll);
@@ -253,7 +249,7 @@ public class HomeActivity extends Activity {
 
         scroll.addView(content, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(scroll, match());
-        root.addView(buildShelfInfo(), shelfInfoLp());
+        root.addView(buildShelfInfo(), match());
 
         pill = new LinearLayout(this);
         pill.setOrientation(LinearLayout.HORIZONTAL);
@@ -347,6 +343,19 @@ public class HomeActivity extends Activity {
 
     private View overlay() {
         return new Overlay(this);
+    }
+
+    // Calque plein écran dont les enfants ne se chevauchent pas : sa transparence s'applique à chacun,
+    // sans tampon hors écran de la taille de l'écran pendant les fondus.
+    static final class Layer extends FrameLayout {
+        Layer(Context ctx) {
+            super(ctx);
+        }
+
+        @Override
+        public boolean hasOverlappingRendering() {
+            return false;
+        }
     }
 
     // Voile plein écran : sa transparence s'applique directement, sans tampon hors écran à chaque image.
@@ -542,32 +551,60 @@ public class HomeActivity extends Activity {
     }
 
     private FrameLayout.LayoutParams shelfInfoLp() {
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams((int) (screenW * 0.56f), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
-        lp.setMargins(dp(49), dp(64), 0, 0);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams((int) (screenW * 0.56f), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL | Gravity.START);
+        lp.leftMargin = dp(49);
         return lp;
     }
 
+    private int bandHeight() {
+        return screenH - dp(170) - dp(BAND_TOP);
+    }
+
     private View buildShelfInfo() {
-        shelfInfo = new LinearLayout(this);
-        shelfInfo.setOrientation(LinearLayout.VERTICAL);
+        // Conteneur de l'aperçu : texte à gauche et, pour les petits visuels, vignette nette à droite.
+        shelfInfo = new Layer(this);
         shelfInfo.setClipChildren(false);
         shelfInfo.setClipToPadding(false);
         shelfInfo.setAlpha(0f);
-
+        shelfThumb = new ImageView(this);
+        shelfThumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        shelfThumb.setOutlineProvider(new Tile.Rounded(dp(14)));
+        shelfThumb.setClipToOutline(true);
+        shelfThumb.setElevation(dp(18));
+        shelfThumb.setAlpha(0f);
         shelfApp = text(12, 0xCCFFFFFF, 700);
         shelfApp.setLetterSpacing(0.1f);
-        shelfInfo.addView(shelfApp);
+        // Même ligne que la pastille de l'heure (en haut à droite) : même hauteur, texte centré.
+        shelfApp.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout.LayoutParams appLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36), Gravity.TOP | Gravity.START);
+        appLp.setMargins(dp(49), dp(26), 0, 0);
+        shelfInfo.addView(shelfApp, appLp);
+        // Bande entre le nom de l'appli et le dock : texte à gauche et vignette à droite, centrés en hauteur.
+        FrameLayout band = new Layer(this);
+        band.setClipChildren(false);
+        band.setClipToPadding(false);
+        FrameLayout.LayoutParams bandLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, bandHeight(), Gravity.TOP);
+        bandLp.topMargin = dp(BAND_TOP);
+        shelfInfo.addView(band, bandLp);
+        FrameLayout.LayoutParams thumbLp = new FrameLayout.LayoutParams(0, 0, Gravity.CENTER_VERTICAL | Gravity.END);
+        thumbLp.rightMargin = dp(48);
+        band.addView(shelfThumb, thumbLp);
+        shelfText = new LinearLayout(this);
+        shelfText.setOrientation(LinearLayout.VERTICAL);
+        shelfText.setClipChildren(false);
+        shelfText.setClipToPadding(false);
+        band.addView(shelfText, shelfInfoLp());
 
         shelfTitle = text(38, 0xFFFFFFFF, 700);
         shelfTitle.setShadowLayer(14, 0, 2, 0x99000000);
         shelfTitle.setMaxLines(2);
         shelfTitle.setEllipsize(TextUtils.TruncateAt.END);
         shelfTitle.setLineSpacing(0, 0.95f);
-        shelfTitle.setPadding(0, dp(6), 0, dp(8));
-        shelfInfo.addView(shelfTitle);
+        shelfTitle.setPadding(0, 0, 0, dp(8));
+        shelfText.addView(shelfTitle);
 
         shelfDetail = text(15, 0xF2FFFFFF, 600);
-        shelfInfo.addView(shelfDetail);
+        shelfText.addView(shelfDetail);
 
         shelfTrack = new FrameLayout(this);
         GradientDrawable tbg = new GradientDrawable();
@@ -582,13 +619,13 @@ public class HomeActivity extends Activity {
         shelfTrack.addView(shelfFill, new FrameLayout.LayoutParams(0, dp(4)));
         LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(dp(200), dp(4));
         trLp.topMargin = dp(10);
-        shelfInfo.addView(shelfTrack, trLp);
+        shelfText.addView(shelfTrack, trLp);
 
         shelfDots = new LinearLayout(this);
         shelfDots.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams dotsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         dotsLp.topMargin = dp(14);
-        shelfInfo.addView(shelfDots, dotsLp);
+        shelfText.addView(shelfDots, dotsLp);
 
         shelfButtons = new LinearLayout(this);
         shelfButtons.setOrientation(LinearLayout.HORIZONTAL);
@@ -596,22 +633,14 @@ public class HomeActivity extends Activity {
         shelfButtons.setAlpha(0f);
         btnPlay = shelfButton(R.drawable.ic_play, "Reprendre");
         btnPlayLabel = (TextView) btnPlay.getChildAt(1);
-        btnInfo = shelfButton(0, "Ouvrir l'appli");
         btnPlay.setOnClickListener(v -> {
             WatchNext.Item it = currentShelfItem();
             if (it != null) openWatch(it);
         });
-        btnInfo.setOnClickListener(v -> {
-            AppEntry app = shelfPkg == null ? null : appsByPkg.get(shelfPkg);
-            if (app != null) launch(app);
-        });
         shelfButtons.addView(btnPlay, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)));
-        LinearLayout.LayoutParams biLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42));
-        biLp.leftMargin = dp(14);
-        shelfButtons.addView(btnInfo, biLp);
         LinearLayout.LayoutParams sbLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         sbLp.topMargin = dp(22);
-        shelfInfo.addView(shelfButtons, sbLp);
+        shelfText.addView(shelfButtons, sbLp);
         return shelfInfo;
     }
 
@@ -627,13 +656,13 @@ public class HomeActivity extends Activity {
         bg.setColor(0x40FFFFFF);
         b.setBackground(bg);
         ImageView iv = new ImageView(this);
-        if (icon != 0) iv.setImageResource(icon);
-        b.addView(iv, new LinearLayout.LayoutParams(icon != 0 ? dp(15) : 0, dp(15)));
+        iv.setImageResource(icon);
+        b.addView(iv, new LinearLayout.LayoutParams(dp(15), dp(15)));
         TextView tv = text(15, 0xFFFFFFFF, 600);
         tv.setShadowLayer(0, 0, 0, 0);
         tv.setText(label);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tlp.leftMargin = icon != 0 ? dp(9) : 0;
+        tlp.leftMargin = dp(9);
         b.addView(tv, tlp);
         b.setOnFocusChangeListener((v, focused) -> {
             bg.setColor(focused ? 0xF7FFFFFF : 0x40FFFFFF);
@@ -657,6 +686,9 @@ public class HomeActivity extends Activity {
         bg.execute(() -> {
             List<WatchNext.Item> all = WatchNext.all(this, allowed);
             Map<String, List<WatchNext.Item>> map = WatchNext.grouped(all, 6);
+            for (Map.Entry<String, List<WatchNext.Item>> e : WatchNext.grouped(WatchNext.previews(this, allowed), 6).entrySet()) {
+                if (!map.containsKey(e.getKey())) map.put(e.getKey(), e.getValue());
+            }
             handler.post(() -> {
                 shelf = map;
                 View f = getCurrentFocus();
@@ -690,8 +722,7 @@ public class HomeActivity extends Activity {
         shelfActive = false;
         shelfPkg = null;
         shelfToken++;
-        shelfInfo.animate().alpha(0f).setDuration(300).start();
-        shelfScrim.animate().alpha(0f).setDuration(300).start();
+        shelfInfo.animate().alpha(0f).setDuration(300).withEndAction(() -> shelfThumb.setAlpha(0f)).start();
         if (currentWall != null) displayBackdrop(currentWall);
     }
 
@@ -732,30 +763,93 @@ public class HomeActivity extends Activity {
         shelfInfo.setTranslationX(-dp(12));
         shelfInfo.setAlpha(Math.min(shelfInfo.getAlpha(), 0.4f) * visible);
         shelfInfo.animate().alpha(visible).translationX(0f).setDuration(450).setInterpolator(new DecelerateInterpolator(1.6f)).start();
-        shelfScrim.animate().alpha(visible).setDuration(450).start();
 
         int token = ++shelfToken;
         String key = it.art;
         Bitmap cached = key == null ? null : artCache.get(key);
         if (cached != null) {
-            displayBackdrop(cached);
+            showArt(cached);
         } else if (key == null || failedArt.contains(key)) {
-            if (currentWall != null) displayBackdrop(currentWall);
+            showArt(null);
         } else {
+            shelfThumb.animate().alpha(0f).setDuration(150).start();
             img.execute(() -> {
-                Bitmap bmp = loadArt(key, 1280);
+                Bitmap raw = loadArt(key, 1920);
+                Bitmap bmp = raw != null && isFull(raw) ? Shade.of(raw, ratio(), true) : raw;
                 handler.post(() -> {
-                    if (bmp != null) artCache.put(key, bmp);
+                    if (bmp != null) cacheArt(key, bmp);
                     else failedArt.add(key);
                     if (token != shelfToken || !shelfActive) return;
-                    // Sans image, on garde le fond d'écran plutôt que le visuel du programme précédent.
-                    if (bmp != null) displayBackdrop(bmp);
-                    else if (currentWall != null) displayBackdrop(currentWall);
+                    showArt(bmp);
                 });
             });
         }
         handler.removeCallbacks(shelfAdvance);
         if (!shelfFocused) handler.postDelayed(shelfAdvance, 9000);
+    }
+
+    // Visuel d'un programme : plein écran s'il est à la résolution de l'écran ; plus petit, vignette nette à droite
+    // (jamais agrandie) sur un fond flouté du même visuel. Sans visuel : le fond d'écran.
+    private boolean isFull(Bitmap bmp) {
+        return bmp.getWidth() >= screenW * 0.9f && bmp.getHeight() >= screenH * 0.9f;
+    }
+
+    private void showArt(Bitmap bmp) {
+        if (bmp == null || isFull(bmp)) {
+            shelfThumb.animate().alpha(0f).setDuration(250).start();
+            textWidth((int) (screenW * 0.56f));
+            if (bmp != null) displayBackdrop(bmp, true);
+            else showWallBehindText();
+            return;
+        }
+        float sc = Math.min(1f, Math.min(screenW * 0.42f / bmp.getWidth(), bandHeight() / (float) bmp.getHeight()));
+        int w = Math.round(bmp.getWidth() * sc), h = Math.round(bmp.getHeight() * sc);
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) shelfThumb.getLayoutParams();
+        lp.width = w;
+        lp.height = h;
+        shelfThumb.setLayoutParams(lp);
+        shelfThumb.setImageBitmap(bmp);
+        shelfThumb.setAlpha(0f);
+        shelfThumb.animate().alpha(1f).setDuration(450).start();
+        textWidth(screenW - dp(48) - w - dp(40) - dp(49));
+        if (bmp != blurSrc) {
+            blurSrc = bmp;
+            Bitmap b = Blur.of(bmp, 192, 108, 6, 3);
+            new Canvas(b).drawColor(0x26000000);
+            blurBg = Shade.of(b, ratio(), true);
+        }
+        displayBackdrop(blurBg, true);
+    }
+
+    // Aperçu sans visuel : le fond d'écran, assombri à gauche pour la lisibilité du texte.
+    private void showWallBehindText() {
+        Bitmap raw = wallRaw;
+        if (raw == null) {
+            if (currentWall != null) displayBackdrop(currentWall);
+            return;
+        }
+        if (raw == wallShelfSrc) {
+            displayBackdrop(wallShelf);
+            return;
+        }
+        int token = shelfToken;
+        img.execute(() -> {
+            Bitmap shaded = Shade.of(raw, ratio(), true);
+            handler.post(() -> {
+                wallShelfSrc = raw;
+                wallShelf = shaded;
+                if (token == shelfToken && shelfActive) displayBackdrop(shaded);
+            });
+        });
+    }
+
+    private void textWidth(int w) {
+        // Colonne plus étroite à côté d'une vignette : une ligne de titre de plus.
+        shelfTitle.setMaxLines(w < screenW * 0.5f ? 3 : 2);
+        ViewGroup.LayoutParams lp = shelfText.getLayoutParams();
+        if (lp.width == w) return;
+        lp.width = w;
+        shelfText.setLayoutParams(lp);
     }
 
     private void stepShelf(int delta) {
@@ -772,7 +866,6 @@ public class HomeActivity extends Activity {
         dockPanel.animate().translationY(dp(70)).alpha(0f).setDuration(320).setInterpolator(ease).start();
         grid.animate().translationY(dp(70)).alpha(0f).setDuration(320).setInterpolator(ease).start();
         btnPlay.setFocusable(true);
-        btnInfo.setFocusable(true);
         shelfButtons.animate().alpha(1f).setDuration(300).start();
         btnPlay.requestFocus();
     }
@@ -780,7 +873,6 @@ public class HomeActivity extends Activity {
     private void exitShelf(boolean focusTile) {
         shelfFocused = false;
         btnPlay.setFocusable(false);
-        btnInfo.setFocusable(false);
         shelfButtons.animate().alpha(0f).setDuration(200).start();
         DecelerateInterpolator ease = new DecelerateInterpolator(1.8f);
         dockPanel.animate().translationY(0f).alpha(1f).setDuration(320).setInterpolator(ease).start();
@@ -799,10 +891,37 @@ public class HomeActivity extends Activity {
     }
 
     private Bitmap loadArt(String uri, int maxW) {
+        for (String url : hiRes(uri)) {
+            Bitmap bmp = loadArtFrom(url, maxW);
+            if (bmp != null) return bmp;
+        }
+        return null;
+    }
+
+    // Les applis publient souvent de petites vignettes : on demande d'abord la grande version au même serveur,
+    // puis l'image d'origine si elle n'existe pas.
+    static List<String> hiRes(String uri) {
+        List<String> out = new ArrayList<>();
+        String hi = uri;
+        if (uri.contains("crunchyroll.com/imgsrv/display/thumbnail/")) {
+            hi = uri.replaceFirst("/thumbnail/\\d+x\\d+/", "/thumbnail/1920x1080/");
+        } else if (uri.contains("ytimg.com/vi")) {
+            hi = uri.replaceFirst("/(default|mqdefault|hqdefault|sddefault)\\.(jpg|webp)", "/maxresdefault.$2");
+        } else if (uri.contains("images-amazon.com/images/") || uri.contains("media-amazon.com/images/")) {
+            hi = uri.replaceFirst("\\._[^/]*_\\.(jpg|png)$", "._UX1920_.$1");
+        }
+        if (!hi.equals(uri)) out.add(hi);
+        out.add(uri);
+        return out;
+    }
+
+    private Bitmap loadArtFrom(String uri, int maxW) {
         try {
             byte[] data;
             if (uri.startsWith("http")) {
-                HttpURLConnection con = (HttpURLConnection) new URL(uri).openConnection();
+                // Certaines applis (Prime Video…) donnent des visuels en http : chargés en https, le non-chiffré étant bloqué.
+                String url = uri.startsWith("http://") ? "https://" + uri.substring(7) : uri;
+                HttpURLConnection con = (HttpURLConnection) new URL(url).openConnection();
                 con.setConnectTimeout(10000);
                 con.setReadTimeout(15000);
                 try (InputStream in = con.getInputStream()) {
@@ -822,11 +941,23 @@ public class HomeActivity extends Activity {
             int sample = 1;
             while (b.outWidth / (sample * 2) >= maxW) sample *= 2;
             o.inSampleSize = sample;
-            o.inPreferredConfig = Bitmap.Config.RGB_565;
+            // Couleurs 32 bits : en 16 bits, les dégradés des visuels plein écran font des aplats.
+            o.inPreferredConfig = Bitmap.Config.ARGB_8888;
             return BitmapFactory.decodeByteArray(data, 0, data.length, o);
         } catch (Exception | OutOfMemoryError e) {
             android.util.Log.w("TVHome", "art " + uri + ": " + e);
             return null;
+        }
+    }
+
+    private void cacheArt(String key, Bitmap bmp) {
+        artCache.put(key, bmp);
+        long total = 0;
+        for (Bitmap b : artCache.values()) total += b.getByteCount();
+        Iterator<Map.Entry<String, Bitmap>> it = artCache.entrySet().iterator();
+        while (total > ART_CACHE_BYTES && artCache.size() > 1 && it.hasNext()) {
+            total -= it.next().getValue().getByteCount();
+            it.remove();
         }
     }
 
@@ -1241,7 +1372,6 @@ public class HomeActivity extends Activity {
         inputsButton.setFocusable(false);
         controlButton.setFocusable(false);
         btnPlay.setFocusable(false);
-        btnInfo.setFocusable(false);
         blurView.animate().alpha(1f).setDuration(250).withEndAction(this::syncWall).start();
         shade.setAlpha(0f);
         shade.animate().alpha(1f).setDuration(250).start();
@@ -1348,7 +1478,6 @@ public class HomeActivity extends Activity {
         inputsButton.setFocusable(true);
         controlButton.setFocusable(true);
         btnPlay.setFocusable(shelfFocused);
-        btnInfo.setFocusable(shelfFocused);
         onScroll(scroll.getScrollY());
         if (menuReturnFocus != null && menuReturnFocus.isAttachedToWindow()) menuReturnFocus.requestFocus();
         else focusDock();
@@ -1364,7 +1493,7 @@ public class HomeActivity extends Activity {
         if (reordering) return;
         // Son seulement pour un déplacement fait à la télécommande, pas quand le code replace le focus.
         if (v != null && SystemClock.uptimeMillis() - keyAt < 250) sounds.move();
-        if (v == themeButton || v == inputsButton || v == controlButton || v == btnPlay || v == btnInfo) {
+        if (v == themeButton || v == inputsButton || v == controlButton || v == btnPlay) {
             smoothScroll(0);
             return;
         }
@@ -1410,7 +1539,6 @@ public class HomeActivity extends Activity {
             if (shelfActive) {
                 shelfInfo.animate().cancel();
                 shelfInfo.setAlpha(top);
-                shelfScrim.setAlpha(top);
             }
         }
         if (!shelfFocused) {
@@ -1430,14 +1558,29 @@ public class HomeActivity extends Activity {
     }
 
     private void showWall(Bitmap bmp, String text) {
-        currentWall = bmp;
         currentCaption = text == null ? "" : text;
         handler.removeCallbacks(rotate);
         handler.postDelayed(rotate, walls.interval());
-        if (!shelfActive) displayBackdrop(bmp);
+        img.execute(() -> {
+            Bitmap shaded = Shade.of(bmp, ratio(), false);
+            handler.post(() -> {
+                currentWall = shaded;
+                wallRaw = bmp;
+                if (!shelfActive) displayBackdrop(shaded);
+            });
+        });
+    }
+
+    private float ratio() {
+        return screenW / (float) screenH;
     }
 
     private void displayBackdrop(Bitmap bmp) {
+        displayBackdrop(bmp, false);
+    }
+
+    // still : visuel de programme, fixe comme le « top shelf » de tvOS ; les fonds d'écran gardent leur zoom lent.
+    private void displayBackdrop(Bitmap bmp, boolean still) {
         if (bmp == shownBackdrop) return;
         shownBackdrop = bmp;
         ImageView incoming = wallBack;
@@ -1459,13 +1602,16 @@ public class HomeActivity extends Activity {
                 }).start();
         ObjectAnimator previous = zoom;
         if (previous != null) handler.postDelayed(previous::cancel, FADE_MS);
-        zoom = ObjectAnimator.ofPropertyValuesHolder(incoming,
-                PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.06f),
-                PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.06f));
-        zoom.setDuration(walls.interval() + FADE_MS * 2);
-        zoom.setInterpolator(new LinearInterpolator());
-        zoom.start();
-        if (zoomHeld) zoom.pause();
+        zoom = null;
+        if (!still) {
+            zoom = ObjectAnimator.ofPropertyValuesHolder(incoming,
+                    PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.06f),
+                    PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.06f));
+            zoom.setDuration(walls.interval() + FADE_MS * 2);
+            zoom.setInterpolator(new LinearInterpolator());
+            zoom.start();
+            if (zoomHeld) zoom.pause();
+        }
         wallFront = incoming;
         wallBack = outgoing;
 
@@ -1482,7 +1628,6 @@ public class HomeActivity extends Activity {
         blurView.animate().alpha(0f).setDuration(500).start();
         dim.animate().alpha(0f).setDuration(500).start();
         shelfInfo.animate().alpha(0f).setDuration(500).start();
-        shelfScrim.animate().alpha(0f).setDuration(500).start();
     }
 
     private void exitFullscreen() {
@@ -1494,7 +1639,6 @@ public class HomeActivity extends Activity {
         if (shelfActive) {
             float top = Math.max(0f, 1f - scroll.getScrollY() / (float) dp(120));
             shelfInfo.animate().alpha(top).setDuration(350).start();
-            shelfScrim.animate().alpha(top).setDuration(350).start();
         }
         resetIdle();
     }
@@ -1555,7 +1699,7 @@ public class HomeActivity extends Activity {
             return true;
         }
         boolean top = f == themeButton || f == inputsButton || f == controlButton;
-        boolean btn = f == btnPlay || f == btnInfo;
+        boolean btn = f == btnPlay;
         if (code == KeyEvent.KEYCODE_DPAD_UP && down) {
             if (f instanceof Tile && ((Tile) f).inDock) {
                 if (shelfPending) {
@@ -1581,12 +1725,8 @@ public class HomeActivity extends Activity {
                 exitShelf(true);
                 return true;
             }
-            if (code == KeyEvent.KEYCODE_DPAD_LEFT && f == btnPlay) {
-                stepShelf(-1);
-                return true;
-            }
-            if (code == KeyEvent.KEYCODE_DPAD_RIGHT && f == btnInfo) {
-                stepShelf(1);
+            if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                stepShelf(code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1);
                 return true;
             }
         }

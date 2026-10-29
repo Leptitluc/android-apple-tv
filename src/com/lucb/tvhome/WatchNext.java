@@ -14,10 +14,11 @@ import java.util.Map;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeMap;
 
 final class WatchNext {
     static final class Item {
-        String pkg, title, detail, art, intentUri;
+        String pkg, title, detail, art, intentUri, channel;
         long position, duration, engaged;
         int type;
 
@@ -63,6 +64,7 @@ final class WatchNext {
     static List<String> publishers(Context ctx, Set<String> allowed) {
         Set<String> out = new LinkedHashSet<>();
         for (Item it : load(ctx, allowed, new HashSet<>(), 100)) out.add(it.pkg);
+        for (Item it : previews(ctx, allowed)) out.add(it.pkg);
         return new ArrayList<>(out);
     }
 
@@ -73,6 +75,64 @@ final class WatchNext {
     // Tous les programmes publiés, en une seule requête.
     static List<Item> all(Context ctx, Set<String> allowed) {
         return raw(ctx, allowed, excluded(ctx));
+    }
+
+    // Chaînes de recommandations (« Recommandé », « Abonnements »…) : l'aperçu des applis qui n'ont rien
+    // dans « À suivre », comme les rangées de l'accueil Android TV. Chaîne par défaut de chaque appli.
+    static List<Item> previews(Context ctx, Set<String> allowed) {
+        List<Item> out = new ArrayList<>();
+        Map<Long, String> channels = new HashMap<>();
+        Map<String, Long> first = new HashMap<>();
+        Map<String, String> seen = new TreeMap<>();
+        Set<String> excluded = excluded(ctx);
+        Cursor c = null;
+        try {
+            c = ctx.getContentResolver().query(TvContract.Channels.CONTENT_URI, new String[]{TvContract.Channels._ID,
+                    TvContract.Channels.COLUMN_PACKAGE_NAME, TvContract.Channels.COLUMN_DISPLAY_NAME,
+                    TvContract.Channels.COLUMN_BROWSABLE, TvContract.Channels.COLUMN_TYPE}, null, null, null);
+            while (c != null && c.moveToNext()) {
+                // Le marquage « affichable » est posé par l'accueil d'origine (désactivé) : on ne s'y fie pas.
+                if (!TvContract.Channels.TYPE_PREVIEW.equals(str(c, TvContract.Channels.COLUMN_TYPE))) continue;
+                long id = num(c, TvContract.Channels._ID, -1);
+                String pkg = str(c, TvContract.Channels.COLUMN_PACKAGE_NAME);
+                channels.put(id, str(c, TvContract.Channels.COLUMN_DISPLAY_NAME));
+                // Chaîne par défaut de l'appli : la première qu'elle a créée.
+                if (pkg != null && (!first.containsKey(pkg) || id < first.get(pkg))) first.put(pkg, id);
+            }
+            if (c != null) c.close();
+            c = ctx.getContentResolver().query(TvContract.PreviewPrograms.CONTENT_URI, new String[]{
+                    TvContract.PreviewPrograms.COLUMN_PACKAGE_NAME, TvContract.PreviewPrograms.COLUMN_CHANNEL_ID,
+                    TvContract.PreviewPrograms.COLUMN_BROWSABLE, TvContract.PreviewPrograms.COLUMN_TITLE,
+                    TvContract.PreviewPrograms.COLUMN_WEIGHT, TvContract.PreviewPrograms.COLUMN_INTENT_URI,
+                    TvContract.PreviewPrograms.COLUMN_POSTER_ART_URI, TvContract.PreviewPrograms.COLUMN_THUMBNAIL_URI,
+                    TvContract.PreviewPrograms.COLUMN_POSTER_ART_ASPECT_RATIO, TvContract.PreviewPrograms.COLUMN_THUMBNAIL_ASPECT_RATIO,
+                    TvContract.PreviewPrograms.COLUMN_SEASON_DISPLAY_NUMBER, TvContract.PreviewPrograms.COLUMN_EPISODE_DISPLAY_NUMBER},
+                    null, null, null);
+            while (c != null && c.moveToNext()) {
+                Item it = new Item();
+                it.pkg = str(c, TvContract.PreviewPrograms.COLUMN_PACKAGE_NAME);
+                long ch = num(c, TvContract.PreviewPrograms.COLUMN_CHANNEL_ID, -1);
+                if (it.pkg != null) seen.put(it.pkg, seen.containsKey(it.pkg) ? String.valueOf(Integer.parseInt(seen.get(it.pkg)) + 1) : "1");
+                if (it.pkg == null || !allowed.contains(it.pkg) || excluded.contains(it.pkg)) continue;
+                if (first.get(it.pkg) == null || first.get(it.pkg) != ch) continue;
+                it.title = str(c, TvContract.PreviewPrograms.COLUMN_TITLE);
+                if (it.title == null) continue;
+                it.channel = channels.get(ch);
+                it.type = -1;
+                it.engaged = num(c, TvContract.PreviewPrograms.COLUMN_WEIGHT, 0);
+                it.intentUri = str(c, TvContract.PreviewPrograms.COLUMN_INTENT_URI);
+                it.art = pickArt(c);
+                it.detail = episode(c);
+                out.add(it);
+            }
+            Log.i("TVHome", "previews: channels=" + channels.size() + " programs=" + seen + " kept=" + out.size());
+        } catch (Exception e) {
+            Log.w("TVHome", "previews: " + e);
+        } finally {
+            if (c != null) c.close();
+        }
+        out.sort((a, b) -> Long.compare(b.engaged, a.engaged));
+        return out;
     }
 
     static Map<String, List<Item>> grouped(List<Item> all, int perApp) {
@@ -110,14 +170,19 @@ final class WatchNext {
                 return out;
             }
             int total = 0;
+            // Par appli : programmes publiés et, s'ils sont écartés, pourquoi (journal de diagnostic).
+            Map<String, String> seen = new TreeMap<>();
             while (c.moveToNext()) {
                 total++;
                 Item it = new Item();
                 it.pkg = str(c, TvContract.WatchNextPrograms.COLUMN_PACKAGE_NAME);
-                if (it.pkg == null || !allowed.contains(it.pkg) || excluded.contains(it.pkg)) continue;
-                if (num(c, TvContract.WatchNextPrograms.COLUMN_BROWSABLE, 1) == 0) continue;
+                String why = it.pkg == null ? "sans appli" : !allowed.contains(it.pkg) ? "appli masquée"
+                        : excluded.contains(it.pkg) ? "exclue" : num(c, TvContract.WatchNextPrograms.COLUMN_BROWSABLE, 1) == 0 ? "non affichable"
+                        : str(c, TvContract.WatchNextPrograms.COLUMN_TITLE) == null ? "sans titre" : "ok";
+                String key = it.pkg + (why.equals("ok") ? "" : " (" + why + ")");
+                seen.put(key, seen.containsKey(key) ? String.valueOf(Integer.parseInt(seen.get(key)) + 1) : "1");
+                if (!why.equals("ok")) continue;
                 it.title = str(c, TvContract.WatchNextPrograms.COLUMN_TITLE);
-                if (it.title == null || it.title.isEmpty()) continue;
                 it.type = (int) num(c, TvContract.WatchNextPrograms.COLUMN_WATCH_NEXT_TYPE, 0);
                 it.position = num(c, TvContract.WatchNextPrograms.COLUMN_LAST_PLAYBACK_POSITION_MILLIS, 0);
                 it.duration = num(c, TvContract.WatchNextPrograms.COLUMN_DURATION_MILLIS, 0);
@@ -127,7 +192,7 @@ final class WatchNext {
                 it.detail = episode(c);
                 out.add(it);
             }
-            Log.i("TVHome", "watchnext: rows=" + total + " kept=" + out.size());
+            Log.i("TVHome", "watchnext: rows=" + total + " kept=" + out.size() + " " + seen);
         } catch (Exception e) {
             Log.w("TVHome", "watchnext: " + e);
         } finally {
@@ -158,6 +223,7 @@ final class WatchNext {
     }
 
     static String verb(Item it) {
+        if (it.type == -1) return it.channel != null ? it.channel : "Recommandé";
         switch (it.type) {
             case TvContract.WatchNextPrograms.WATCH_NEXT_TYPE_NEXT:
                 return "À suivre";

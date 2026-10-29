@@ -82,7 +82,9 @@ To skip the language question, set `ACCUEIL_TV_LANG=en` (or `fr`) before the com
 - **Wallpapers** that rotate (nature, art, architecture, night… adjustable), with credits. The
   « Selon l'heure » (by time of day) category shows bright landscapes by day and night skies in the evening.
 - **"Up Next"**: rest on a dock app and its latest shows appear full screen, like the tvOS top shelf,
-  resumed where you left off.
+  resumed where you left off. Apps with nothing to resume show their recommendations instead
+  (e.g. YouTube's personalized picks). Artwork at screen resolution fills the screen; smaller artwork
+  is shown as a sharp thumbnail on a blurred background, never stretched.
 - **Quick menu** on the home screen: wallpaper categories, duration, which apps feed "Up Next",
   show/hide apps, and "More settings".
 - **TV inputs** (HDMI, AV, antenna…) one click away, next to the clock, with the names of
