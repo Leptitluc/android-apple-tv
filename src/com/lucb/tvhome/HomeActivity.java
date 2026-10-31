@@ -69,6 +69,9 @@ public class HomeActivity extends Activity {
     private static final long IDLE_MS = 90_000;
     private static final long ZOOM_PAUSE_MS = 4_000;
     private static final long SHELF_DELAY_MS = 400;
+    // Délai entre le retour à l'accueil et l'ouverture d'une entrée : l'appli TV du fabricant doit avoir fini
+    // de se fermer, sinon sa fermeture tardive coupe l'image HDMI qu'elle vient de rouvrir (écran noir).
+    private static final long INPUT_SETTLE_MS = 2_000;
     private static final int BAND_TOP = 80;
     private static final long ART_CACHE_BYTES = 40L * 1024 * 1024;
 
@@ -92,6 +95,10 @@ public class HomeActivity extends Activity {
     private ImageView nowArt;
     private TextView nowTitle;
     private long keyAt;
+    private long resumedAt;
+    private boolean resumed;
+    private Runnable pendingInput;
+    private long pendingAt;
     private Tile moving;
     private int moveLimit;
     private boolean reordering;
@@ -398,6 +405,11 @@ public class HomeActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
+        resumedAt = SystemClock.uptimeMillis();
+        // Entrée choisie juste avant le retour au premier plan ; une demande plus ancienne est abandonnée.
+        if (pendingInput != null && SystemClock.uptimeMillis() - pendingAt < INPUT_SETTLE_MS) handler.postDelayed(pendingInput, INPUT_SETTLE_MS);
+        else pendingInput = null;
         nowPlaying.start();
         handler.removeCallbacks(rotate);
         if (wallFront.getDrawable() == null) walls.next(this::showWall);
@@ -414,6 +426,9 @@ public class HomeActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        resumed = false;
+        if (pendingInput != null) handler.removeCallbacks(pendingInput);
+        pendingInput = null;
         nowPlaying.stop();
         if (moving != null) endMove();
         handler.removeCallbacks(rotate);
@@ -1189,6 +1204,18 @@ public class HomeActivity extends Activity {
     }
 
     private void openInput(Inputs.Input in) {
+        if (pendingInput != null) handler.removeCallbacks(pendingInput);
+        pendingInput = () -> {
+            pendingInput = null;
+            launchInput(in);
+        };
+        pendingAt = SystemClock.uptimeMillis();
+        // Pas encore revenu au premier plan : on attend onResume, qui relance l'ouverture.
+        if (!resumed) return;
+        handler.postDelayed(pendingInput, Math.max(0, resumedAt + INPUT_SETTLE_MS - SystemClock.uptimeMillis()));
+    }
+
+    private void launchInput(Inputs.Input in) {
         try {
             startActivity(Inputs.intent(in));
         } catch (Exception e) {
